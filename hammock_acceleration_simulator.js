@@ -256,13 +256,6 @@ function drawStage(d) {
   ctx.beginPath();
   ctx.arc(bx, by, 17, 0, 7);
   ctx.fill();
-  // "always zero" tag in velocity mode
-  if (mode === "v") {
-    ctx.fillStyle = "#94a3b8";
-    ctx.font = "12px " + col("--mono");
-    ctx.textAlign = "center";
-    ctx.fillText("no radial component", bx, by + 40);
-  }
 }
 
 // --- traces ---
