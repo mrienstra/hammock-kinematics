@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hammock kinematics — velocity, acceleration, jerk</title>
+  <link href=hammock_acceleration_simulator.css rel=stylesheet />
+</head>
+
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Hammock kinematics</h1>
+      <p>A frictionless pendulum bob. Velocity, acceleration, and jerk — each split into tangential and radial
+        (centripetal) parts, plus its direction-free magnitude.</p>
+    </header>
+
+    <div class="panel controls">
+      <div class="ctl">
+        <label>Release angle <b><span id="angReadout">45</span>&deg;</b></label>
+        <input type="range" id="angle" min="5" max="90" value="45" step="1">
+      </div>
+      <div class="ctl">
+        <label>Suspension length <b><span id="lenReadout">2.0</span> m</b></label>
+        <input type="range" id="length" min="0.5" max="4" value="2" step="0.1">
+      </div>
+      <div class="btns">
+        <button id="playBtn">Pause</button>
+        <button id="resetBtn">Reset peaks</button>
+      </div>
+    </div>
+
+    <div class="main">
+      <!-- LEFT: stage -->
+      <div class="panel stage">
+        <div class="seg" id="modeSeg">
+          <button data-mode="v" class="on">Velocity</button>
+          <button data-mode="a">Acceleration</button>
+          <button data-mode="j">Jerk</button>
+        </div>
+        <canvas id="stage" class="stagecanvas"></canvas>
+        <div class="legend">
+          <span><i class="swatch" style="background:var(--tan)"></i>Tangential</span>
+          <span><i class="swatch" style="background:var(--cen)"></i>Radial (centripetal)</span>
+          <span><i class="swatch" style="background:var(--res);height:4px"></i>Resultant</span>
+        </div>
+        <div class="gwrap">
+          <div>
+            <div class="lab">Felt g-force <span style="opacity:.7">(what the fabric pushes)</span></div>
+            <div class="big"><span id="gNow">1.00</span> &times; g</div>
+          </div>
+          <div class="pk">peak<br><span id="gPk">1.00</span> &times; g</div>
+        </div>
+      </div>
+
+      <!-- RIGHT: decomposition -->
+      <div class="panel">
+        <table>
+          <thead>
+            <tr>
+              <th>Quantity</th>
+              <th class="c-tan">Tangential</th>
+              <th class="c-cen">Centripetal</th>
+              <th class="c-res">Magnitude</th>
+              <th>Peak</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="q">Velocity<small>m/s</small></td>
+              <td class="c-tan" id="v_t">0.00</td>
+              <td class="zero" id="v_c">0 &mdash; always</td>
+              <td class="c-res" id="v_m">0.00</td>
+              <td id="v_p">0.00</td>
+            </tr>
+            <tr>
+              <td class="q">Acceleration<small>m/s&sup2;</small></td>
+              <td class="c-tan" id="a_t">0.00</td>
+              <td class="c-cen" id="a_c">0.00</td>
+              <td class="c-res" id="a_m">0.00</td>
+              <td id="a_p">0.00</td>
+            </tr>
+            <tr>
+              <td class="q">Jerk<small>m/s&sup3;</small></td>
+              <td class="c-tan" id="j_t">0.0</td>
+              <td class="c-cen" id="j_c">0.0</td>
+              <td class="c-res" id="j_m">0.0</td>
+              <td id="j_p">0.0</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="note">Only velocity's centripetal component is <em>structurally</em> zero — the radius never changes,
+          so nothing points along the rope. Acceleration and jerk gain radial parts from the velocity vector
+          <em>turning</em>. Watch for the instantaneous zeros too: at the ends of the swing, velocity and jerk both
+          vanish; at the bottom, tangential acceleration and radial jerk both vanish. Period ≈ <b id="period"
+            style="font-family:var(--mono)">—</b> s.
+        </p>
+      </div>
+    </div>
+
+    <!-- TRACES -->
+    <div class="panel traces">
+      <div class="trace">
+        <h3>|Velocity|<span class="v c-res" id="tv">0.00</span></h3>
+        <div class="sub">m/s &nbsp;·&nbsp; peak <span id="tvp">0.00</span></div>
+        <canvas id="cv" height="120"></canvas>
+      </div>
+      <div class="trace">
+        <h3>|Acceleration|<span class="v c-res" id="ta">0.00</span></h3>
+        <div class="sub">m/s&sup2; &nbsp;·&nbsp; peak <span id="tap">0.00</span></div>
+        <canvas id="ca" height="120"></canvas>
+      </div>
+      <div class="trace">
+        <h3>|Jerk|<span class="v c-res" id="tj">0.0</span></h3>
+        <div class="sub">m/s&sup3; &nbsp;·&nbsp; peak <span id="tjp">0.0</span></div>
+        <canvas id="cj" height="120"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script src="hammock_acceleration_simulator.js"></script>
+</body>
+
+</html>
