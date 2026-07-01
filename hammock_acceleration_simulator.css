@@ -66,9 +66,13 @@ header p {
 /* controls */
 .controls {
   display: grid;
-  grid-template-columns: 1fr 1fr auto;
+  grid-template-columns: 1fr 1fr auto auto;
   gap: 1rem 1.5rem;
   align-items: center;
+}
+
+.unit-ctl {
+  align-self: end;
 }
 
 .ctl {
@@ -135,7 +139,7 @@ button:active {
   }
 
   .controls {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
   }
 }
 

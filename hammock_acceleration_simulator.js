@@ -7,6 +7,20 @@ let theta = thetaMax,
   omega = 0;
 let playing = true;
 let mode = "v";
+let unit = "m";
+const CONV = { m: 1, ft: 3.28084, in: 39.3701 };
+function toU(v) { return v * CONV[unit]; }
+function fmtLen(m) { return (m * CONV[unit]).toFixed(unit === "in" ? 0 : 1); }
+function updateUnitLabels() {
+  const s = unit === "in" ? "in" : unit;
+  $("u_len").textContent = unit;
+  $("u_v").textContent = s + "/s";
+  $("u_a").textContent = s + "/s²";
+  $("u_j").textContent = s + "/s³";
+  $("u_tv").textContent = s + "/s";
+  $("u_ta").textContent = s + "/s²";
+  $("u_tj").textContent = s + "/s³";
+}
 
 // peaks (direction-free magnitudes)
 let peak = { v: 0, a: 0, j: 0, gforce: 1, res_v: 0, res_a: 0, res_j: 0 };
@@ -22,7 +36,7 @@ $("angle").addEventListener("input", (e) => {
 });
 $("length").addEventListener("input", (e) => {
   L = parseFloat(e.target.value);
-  $("lenReadout").textContent = L.toFixed(1);
+  $("lenReadout").textContent = fmtLen(L);
   relaunch();
 });
 $("playBtn").addEventListener("click", (e) => {
@@ -39,6 +53,14 @@ $("modeSeg").addEventListener("click", (e) => {
   if (!b) return;
   mode = b.dataset.mode;
   [...$("modeSeg").children].forEach((c) => c.classList.toggle("on", c === b));
+});
+$("unitSeg").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  unit = b.dataset.unit;
+  [...$("unitSeg").children].forEach((c) => c.classList.toggle("on", c === b));
+  updateUnitLabels();
+  $("lenReadout").textContent = fmtLen(L);
 });
 function relaunch() {
   theta = thetaMax;
@@ -344,31 +366,31 @@ function loop(now) {
   histJr.shift();
 
   // table
-  $("v_t").textContent = d.vmag.toFixed(2);
-  $("v_m").textContent = d.vmag.toFixed(2);
-  $("v_p").textContent = peak.v.toFixed(2);
-  $("a_t").textContent = Math.abs(d.at).toFixed(2);
-  $("a_c").textContent = d.ac.toFixed(2);
-  $("a_m").textContent = d.amag.toFixed(2);
-  $("a_p").textContent = peak.a.toFixed(2);
-  $("j_t").textContent = Math.abs(d.jt).toFixed(1);
-  $("j_c").textContent = Math.abs(d.jr).toFixed(1);
-  $("j_m").textContent = d.jmag.toFixed(1);
-  $("j_p").textContent = peak.j.toFixed(1);
+  $("v_t").textContent = toU(d.vmag).toFixed(2);
+  $("v_m").textContent = toU(d.vmag).toFixed(2);
+  $("v_p").textContent = toU(peak.v).toFixed(2);
+  $("a_t").textContent = toU(Math.abs(d.at)).toFixed(2);
+  $("a_c").textContent = toU(d.ac).toFixed(2);
+  $("a_m").textContent = toU(d.amag).toFixed(2);
+  $("a_p").textContent = toU(peak.a).toFixed(2);
+  $("j_t").textContent = toU(Math.abs(d.jt)).toFixed(1);
+  $("j_c").textContent = toU(Math.abs(d.jr)).toFixed(1);
+  $("j_m").textContent = toU(d.jmag).toFixed(1);
+  $("j_p").textContent = toU(peak.j).toFixed(1);
   // gforce
   $("gNow").textContent = d.gforce.toFixed(2);
   $("gPk").textContent = peak.gforce.toFixed(2);
   // trace readouts
-  $("tv").textContent = d.vmag.toFixed(2);
-  $("tvp").textContent = peak.v.toFixed(2);
-  $("ta_t").textContent = Math.abs(d.at).toFixed(2);
-  $("ta_c").textContent = d.ac.toFixed(2);
-  $("ta_m").textContent = d.amag.toFixed(2);
-  $("tap").textContent = peak.a.toFixed(2);
-  $("tj_t").textContent = Math.abs(d.jt).toFixed(1);
-  $("tj_c").textContent = Math.abs(d.jr).toFixed(1);
-  $("tj_m").textContent = d.jmag.toFixed(1);
-  $("tjp").textContent = peak.j.toFixed(1);
+  $("tv").textContent = toU(d.vmag).toFixed(2);
+  $("tvp").textContent = toU(peak.v).toFixed(2);
+  $("ta_t").textContent = toU(Math.abs(d.at)).toFixed(2);
+  $("ta_c").textContent = toU(d.ac).toFixed(2);
+  $("ta_m").textContent = toU(d.amag).toFixed(2);
+  $("tap").textContent = toU(peak.a).toFixed(2);
+  $("tj_t").textContent = toU(Math.abs(d.jt)).toFixed(1);
+  $("tj_c").textContent = toU(Math.abs(d.jr)).toFixed(1);
+  $("tj_m").textContent = toU(d.jmag).toFixed(1);
+  $("tjp").textContent = toU(peak.j).toFixed(1);
 
   // render
   drawStage(d);

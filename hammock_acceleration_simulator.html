@@ -22,8 +22,16 @@
         <input type="range" id="angle" min="5" max="90" value="45" step="1">
       </div>
       <div class="ctl">
-        <label>Suspension length <b><span id="lenReadout">2.0</span> m</b></label>
+        <label>Suspension length <b><span id="lenReadout">2.0</span> <span id="u_len">m</span></b></label>
         <input type="range" id="length" min="0.5" max="4" value="2" step="0.1">
+      </div>
+      <div class="ctl unit-ctl">
+        <label>Units</label>
+        <div class="seg" id="unitSeg">
+          <button data-unit="m" class="on">m</button>
+          <button data-unit="ft">ft</button>
+          <button data-unit="in">in</button>
+        </div>
       </div>
       <div class="btns">
         <button id="playBtn">Pause</button>
@@ -68,21 +76,21 @@
           </thead>
           <tbody>
             <tr>
-              <td class="q">Velocity<small>m/s</small></td>
+              <td class="q">Velocity<small id="u_v">m/s</small></td>
               <td class="c-tan" id="v_t">0.00</td>
               <td class="zero" id="v_c">0 &mdash; always</td>
               <td class="c-res" id="v_m">0.00</td>
               <td id="v_p">0.00</td>
             </tr>
             <tr>
-              <td class="q">Acceleration<small>m/s&sup2;</small></td>
+              <td class="q">Acceleration<small id="u_a">m/s²</small></td>
               <td class="c-tan" id="a_t">0.00</td>
               <td class="c-cen" id="a_c">0.00</td>
               <td class="c-res" id="a_m">0.00</td>
               <td id="a_p">0.00</td>
             </tr>
             <tr>
-              <td class="q">Jerk<small>m/s&sup3;</small></td>
+              <td class="q">Jerk<small id="u_j">m/s³</small></td>
               <td class="c-tan" id="j_t">0.0</td>
               <td class="c-cen" id="j_c">0.0</td>
               <td class="c-res" id="j_m">0.0</td>
@@ -98,7 +106,7 @@
     <div class="panel traces">
       <div class="trace">
         <h3>Velocity <span class="v c-res" id="tv">0.00</span></h3>
-        <div class="sub">m/s &nbsp;·&nbsp; peak <span id="tvp">0.00</span></div>
+        <div class="sub"><span id="u_tv">m/s</span> &nbsp;·&nbsp; peak <span id="tvp">0.00</span></div>
         <canvas id="cv" height="120"></canvas>
       </div>
       <div class="trace">
@@ -107,7 +115,7 @@
           <span class="c-tan">tan <span id="ta_t">0.00</span></span>
           <span class="c-cen">cen <span id="ta_c">0.00</span></span>
           <span class="c-res">|&middot;| <span id="ta_m">0.00</span></span>
-          <span>m/s&sup2; &nbsp;pk <span id="tap">0.00</span></span>
+          <span><span id="u_ta">m/s²</span> &nbsp;pk <span id="tap">0.00</span></span>
         </div>
         <canvas id="ca" height="120"></canvas>
       </div>
@@ -117,7 +125,7 @@
           <span class="c-tan">tan <span id="tj_t">0.0</span></span>
           <span class="c-cen">cen <span id="tj_c">0.0</span></span>
           <span class="c-res">|&middot;| <span id="tj_m">0.0</span></span>
-          <span>m/s&sup3; &nbsp;pk <span id="tjp">0.0</span></span>
+          <span><span id="u_tj">m/s³</span> &nbsp;pk <span id="tjp">0.0</span></span>
         </div>
         <canvas id="cj" height="120"></canvas>
       </div>
