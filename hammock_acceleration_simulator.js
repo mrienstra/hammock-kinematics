@@ -50,7 +50,11 @@ function resetPeaks() {
   peak = { v: 0, a: 0, j: 0, gforce: 1, res_v: 0, res_a: 0, res_j: 0 };
   histV.fill(0);
   histA.fill(0);
+  histAt.fill(0);
+  histAc.fill(0);
   histJ.fill(0);
+  histJt.fill(0);
+  histJr.fill(0);
 }
 
 // --- accurate period via arithmetic-geometric mean (complete elliptic K) ---
@@ -265,14 +269,19 @@ function drawStage(d) {
 const N = 280;
 const histV = new Array(N).fill(0),
   histA = new Array(N).fill(0),
-  histJ = new Array(N).fill(0);
+  histAt = new Array(N).fill(0),
+  histAc = new Array(N).fill(0),
+  histJ = new Array(N).fill(0),
+  histJt = new Array(N).fill(0),
+  histJr = new Array(N).fill(0);
 let CV, CA, CJ;
 function sizeTraces() {
   CV = fit($("cv"), 120);
   CA = fit($("ca"), 120);
   CJ = fit($("cj"), 120);
 }
-function drawTrace(T, hist, color, peakVal) {
+// series: [{hist, color, width?}, ...]  — drawn in order (last on top)
+function drawTrace(T, series, peakVal) {
   const { ctx, w, h } = T;
   ctx.clearRect(0, 0, w, h);
   const max = Math.max(peakVal, 1e-6);
@@ -291,16 +300,18 @@ function drawTrace(T, hist, color, peakVal) {
   ctx.moveTo(0, h - 2);
   ctx.lineTo(w, h - 2);
   ctx.stroke();
-  // trace
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1.8;
-  ctx.beginPath();
-  for (let i = 0; i < N; i++) {
-    const x = (i / (N - 1)) * w,
-      y = h - 2 - (hist[i] / max) * (h - 10);
-    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  // traces
+  for (const { hist, color, width } of series) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width ?? 1.8;
+    ctx.beginPath();
+    for (let i = 0; i < N; i++) {
+      const x = (i / (N - 1)) * w,
+        y = h - 2 - (hist[i] / max) * (h - 10);
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.stroke();
   }
-  ctx.stroke();
 }
 
 // --- main loop ---
@@ -328,8 +339,16 @@ function loop(now) {
   histV.shift();
   histA.push(d.amag);
   histA.shift();
+  histAt.push(Math.abs(d.at));
+  histAt.shift();
+  histAc.push(d.ac);
+  histAc.shift();
   histJ.push(d.jmag);
   histJ.shift();
+  histJt.push(Math.abs(d.jt));
+  histJt.shift();
+  histJr.push(Math.abs(d.jr));
+  histJr.shift();
 
   // table
   $("v_t").textContent = d.vmag.toFixed(2);
@@ -349,29 +368,38 @@ function loop(now) {
   // trace readouts
   $("tv").textContent = d.vmag.toFixed(2);
   $("tvp").textContent = peak.v.toFixed(2);
-  $("ta").textContent = d.amag.toFixed(2);
+  $("ta_t").textContent = Math.abs(d.at).toFixed(2);
+  $("ta_c").textContent = d.ac.toFixed(2);
+  $("ta_m").textContent = d.amag.toFixed(2);
   $("tap").textContent = peak.a.toFixed(2);
-  $("tj").textContent = d.jmag.toFixed(1);
+  $("tj_t").textContent = Math.abs(d.jt).toFixed(1);
+  $("tj_c").textContent = Math.abs(d.jr).toFixed(1);
+  $("tj_m").textContent = d.jmag.toFixed(1);
   $("tjp").textContent = peak.j.toFixed(1);
 
   // render
   drawStage(d);
-  drawTrace(
-    CV,
-    histV,
-    getComputedStyle(document.documentElement).getPropertyValue("--res").trim(),
-    peak.v,
-  );
+  const css = getComputedStyle(document.documentElement);
+  const tanColor = css.getPropertyValue("--tan").trim();
+  const cenColor = css.getPropertyValue("--cen").trim();
+  const resColor = css.getPropertyValue("--res").trim();
+  drawTrace(CV, [{ hist: histV, color: resColor, width: 2 }], peak.v);
   drawTrace(
     CA,
-    histA,
-    getComputedStyle(document.documentElement).getPropertyValue("--res").trim(),
+    [
+      { hist: histAt, color: tanColor, width: 1.5 },
+      { hist: histAc, color: cenColor, width: 1.5 },
+      { hist: histA, color: resColor, width: 2.5 },
+    ],
     peak.a,
   );
   drawTrace(
     CJ,
-    histJ,
-    getComputedStyle(document.documentElement).getPropertyValue("--res").trim(),
+    [
+      { hist: histJt, color: tanColor, width: 1.5 },
+      { hist: histJr, color: cenColor, width: 1.5 },
+      { hist: histJ, color: resColor, width: 2.5 },
+    ],
     peak.j,
   );
 

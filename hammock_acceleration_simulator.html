@@ -102,18 +102,28 @@
     <!-- TRACES -->
     <div class="panel traces">
       <div class="trace">
-        <h3>|Velocity|<span class="v c-res" id="tv">0.00</span></h3>
+        <h3>Velocity <span class="v c-res" id="tv">0.00</span></h3>
         <div class="sub">m/s &nbsp;·&nbsp; peak <span id="tvp">0.00</span></div>
         <canvas id="cv" height="120"></canvas>
       </div>
       <div class="trace">
-        <h3>|Acceleration|<span class="v c-res" id="ta">0.00</span></h3>
-        <div class="sub">m/s&sup2; &nbsp;·&nbsp; peak <span id="tap">0.00</span></div>
+        <h3>Acceleration</h3>
+        <div class="sub trace-vals">
+          <span class="c-tan">tan <span id="ta_t">0.00</span></span>
+          <span class="c-cen">cen <span id="ta_c">0.00</span></span>
+          <span class="c-res">|&middot;| <span id="ta_m">0.00</span></span>
+          <span>m/s&sup2; &nbsp;pk <span id="tap">0.00</span></span>
+        </div>
         <canvas id="ca" height="120"></canvas>
       </div>
       <div class="trace">
-        <h3>|Jerk|<span class="v c-res" id="tj">0.0</span></h3>
-        <div class="sub">m/s&sup3; &nbsp;·&nbsp; peak <span id="tjp">0.0</span></div>
+        <h3>Jerk</h3>
+        <div class="sub trace-vals">
+          <span class="c-tan">tan <span id="tj_t">0.0</span></span>
+          <span class="c-cen">cen <span id="tj_c">0.0</span></span>
+          <span class="c-res">|&middot;| <span id="tj_m">0.0</span></span>
+          <span>m/s&sup3; &nbsp;pk <span id="tjp">0.0</span></span>
+        </div>
         <canvas id="cj" height="120"></canvas>
       </div>
     </div>

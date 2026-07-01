@@ -335,6 +335,12 @@ tbody tr:last-child td {
   font-family: var(--mono);
 }
 
+.trace-vals {
+  display: flex;
+  gap: 0.1rem 0.75rem;
+  flex-wrap: wrap;
+}
+
 .trace canvas {
   background: #fbfcfd;
   border: 1px solid var(--line);
