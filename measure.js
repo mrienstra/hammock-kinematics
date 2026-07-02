@@ -297,8 +297,9 @@ function analyzeDecay() {
   const out = { status: "ok", tau, halfLife, Q, sigma, dropFrac, nCycles: n };
 
   // upgrade: separate viscous (γ) from dry-friction (c) once the envelope
-  // has enough curvature to constrain two parameters
-  if (dropFrac >= 0.2 && n >= 12) {
+  // has enough curvature to constrain two parameters. Tentative from 15%
+  // (kept honest by the "swing longer to firm up" note below 30%).
+  if (dropFrac >= 0.15 && n >= 12) {
     const xs = [], ys = [];
     for (let i = 0; i < n - 1; i++) {
       const dt = t[i + 1] - t[i];
