@@ -152,6 +152,134 @@ button:active {
   transform: scale(0.97);
 }
 
+/* measure */
+.measure {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.measure-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.m-title {
+  margin: 0 0 0.2rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.m-sub {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  max-width: 62ch;
+}
+
+#measBtn {
+  flex: none;
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+#measBtn:hover {
+  background: #4338ca;
+}
+
+#measBtn.recording {
+  background: var(--tan);
+  border-color: var(--tan);
+}
+
+#measBtn.recording:hover {
+  background: #c2410c;
+}
+
+.m-status {
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.m-status.err {
+  color: var(--tan);
+}
+
+.measure-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+}
+
+@media (max-width: 620px) {
+  .measure-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.m-cell {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.6rem 0.75rem;
+  background: #fbfcfd;
+}
+
+.m-lab {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.m-vs {
+  opacity: 0.7;
+}
+
+.m-val {
+  font-family: var(--mono);
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.m-val span {
+  color: var(--accent);
+}
+
+.m-val span[id$="U"] {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 400;
+}
+
+#mTrace {
+  background: #fbfcfd;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.measure-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.m-hint {
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+#applyBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* main split */
 .main {
   display: grid;

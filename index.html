@@ -39,6 +39,41 @@
       </div>
     </div>
 
+    <div class="panel measure" id="measurePanel">
+      <div class="measure-head">
+        <div>
+          <h3 class="m-title">Measure a real swing</h3>
+          <p class="m-sub">Rest your phone on your body (stomach or between your legs is closest to your center of
+            gravity) and let the hammock swing. Reads the gyroscope + accelerometer, then fills the simulator above.</p>
+        </div>
+        <button id="measBtn">Start measuring</button>
+      </div>
+      <div id="measStatus" class="m-status"></div>
+      <div class="measure-grid" id="measReadouts" hidden>
+        <div class="m-cell">
+          <div class="m-lab">Period</div>
+          <div class="m-val"><span id="mPeriod">—</span> s</div>
+        </div>
+        <div class="m-cell">
+          <div class="m-lab">Swing angle</div>
+          <div class="m-val"><span id="mAngle">—</span>&deg;</div>
+        </div>
+        <div class="m-cell">
+          <div class="m-lab">Effective length</div>
+          <div class="m-val"><span id="mLen">—</span> <span id="mLenU">m</span></div>
+        </div>
+        <div class="m-cell">
+          <div class="m-lab">Phone radius <span class="m-vs">vs length</span></div>
+          <div class="m-val"><span id="mRad">—</span> <span id="mRadU">m</span></div>
+        </div>
+      </div>
+      <canvas id="mTrace" height="120" hidden></canvas>
+      <div class="measure-foot" id="measFoot" hidden>
+        <span class="m-hint" id="mHint">Warming up — swing for a few cycles…</span>
+        <button id="applyBtn" disabled>Apply to simulator &uarr;</button>
+      </div>
+    </div>
+
     <div class="main">
       <!-- LEFT: stage -->
       <div class="panel stage">
