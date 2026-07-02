@@ -29,6 +29,8 @@ function updateUnitLabels() {
   $("u_ts").textContent = s + "/s⁴";
   $("u_tc").textContent = s + "/s⁵";
   $("u_tp").textContent = s + "/s⁶";
+  $("u_g").textContent = s + "/s²";
+  $("u_gp").textContent = s + "/s²";
   $("lenInput").value = fmtLen(L);
   $("lenInput").step = unit === "in" ? "1" : "0.1";
   if (!playing) renderStatic();
@@ -109,6 +111,7 @@ function resetPeaks() {
   histP.fill(0);
   histPt.fill(0);
   histPr.fill(0);
+  histG.fill(0);
   if (!playing) renderStatic();
 }
 
@@ -370,8 +373,9 @@ const histV = new Array(N).fill(0),
   histCr = new Array(N).fill(0),
   histP = new Array(N).fill(0),
   histPt = new Array(N).fill(0),
-  histPr = new Array(N).fill(0);
-let CV, CA, CJ, CS, CC, CP;
+  histPr = new Array(N).fill(0),
+  histG = new Array(N).fill(0);
+let CV, CA, CJ, CS, CC, CP, CG;
 function sizeTraces() {
   CV = fit($("cv"), 120);
   CA = fit($("ca"), 120);
@@ -379,6 +383,7 @@ function sizeTraces() {
   CS = fit($("cs"), 120);
   CC = fit($("cc"), 120);
   CP = fit($("cp"), 120);
+  CG = fit($("cg"), 120);
 }
 // series: [{hist, color, width?}, ...]  — drawn in order (last on top)
 function drawTrace(T, series, peakVal) {
@@ -470,6 +475,8 @@ function loop(now) {
   histPt.shift();
   histPr.push(Math.abs(d.pr));
   histPr.shift();
+  histG.push(d.gforce);
+  histG.shift();
 
   render(d);
   if (playing) requestAnimationFrame(loop);
@@ -501,9 +508,11 @@ function render(d) {
   $("p_c").textContent = toU(Math.abs(d.pr)).toFixed(1);
   $("p_m").textContent = toU(d.pmag).toFixed(1);
   $("p_p").textContent = toU(peak.p).toFixed(1);
-  // gforce
+  // gforce — both as a multiple of g and as an absolute acceleration in the selected unit
   $("gNow").textContent = d.gforce.toFixed(2);
   $("gPk").textContent = peak.gforce.toFixed(2);
+  $("gNowU").textContent = toU(d.gforce * g).toFixed(2);
+  $("gPkU").textContent = toU(peak.gforce * g).toFixed(2);
   // trace readouts
   $("tv").textContent = toU(d.vmag).toFixed(2);
   $("tvp").textContent = toU(peak.v).toFixed(2);
@@ -527,6 +536,8 @@ function render(d) {
   $("tp_c").textContent = toU(Math.abs(d.pr)).toFixed(1);
   $("tp_m").textContent = toU(d.pmag).toFixed(1);
   $("tpp").textContent = toU(peak.p).toFixed(1);
+  $("tg").textContent = d.gforce.toFixed(2);
+  $("tgp").textContent = peak.gforce.toFixed(2);
 
   // render
   drawStage(d);
@@ -580,6 +591,7 @@ function render(d) {
     ],
     peak.p,
   );
+  drawTrace(CG, [{ hist: histG, color: resColor, width: 2 }], peak.gforce);
 }
 
 // redraw current state without advancing the simulation (used when paused)

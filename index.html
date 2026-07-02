@@ -110,8 +110,10 @@
           <div>
             <div class="lab">Felt g-force <span style="opacity:.7">(what the fabric pushes)</span></div>
             <div class="big"><span id="gNow">1.00</span> &times; g</div>
+            <div class="g-abs"><span id="gNowU">9.81</span> <span id="u_g">m/s²</span></div>
           </div>
-          <div class="pk">peak<br><span id="gPk">1.00</span> &times; g</div>
+          <div class="pk">peak<br><span id="gPk">1.00</span> &times; g<br>
+            <span class="g-abs"><span id="gPkU">9.81</span> <span id="u_gp">m/s²</span></span></div>
         </div>
       </div>
 
@@ -178,6 +180,11 @@
 
     <!-- TRACES -->
     <div class="panel traces">
+      <div class="trace">
+        <h3>Felt g-force <span class="v c-res" id="tg">1.00</span></h3>
+        <div class="sub">&times; g &nbsp;·&nbsp; peak <span id="tgp">1.00</span></div>
+        <canvas id="cg" height="120"></canvas>
+      </div>
       <div class="trace">
         <h3>Velocity <span class="v c-res" id="tv">0.00</span></h3>
         <div class="sub"><span id="u_tv">m/s</span> &nbsp;·&nbsp; peak <span id="tvp">0.00</span></div>
