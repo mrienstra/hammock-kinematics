@@ -474,6 +474,10 @@ const MEAS = {
   thetaMax: 0,
   r: 0,
   ready: false,
+  // full recording for export
+  samples: [], // per-event raw + derived
+  cycles: [], // per-cycle solved estimates
+  t0: null, // first event timestamp (s), for relative time
 };
 
 const $$ = (id) => document.getElementById(id);
@@ -549,6 +553,20 @@ function onMotion(ev) {
 
   // half-cycle tracking
   const t = ev.timeStamp / 1000;
+  if (MEAS.t0 == null) MEAS.t0 = t;
+
+  // full recording (raw + derived) for later inspection
+  MEAS.samples.push({
+    t: +(t - MEAS.t0).toFixed(4),
+    dt: +dt.toFixed(4),
+    // raw gyro (deg/s, as the API reports) and accel incl. gravity (m/s²)
+    rrAlpha: rr.alpha, rrBeta: rr.beta, rrGamma: rr.gamma,
+    ax: ai.x, ay: ai.y, az: ai.z,
+    amag: +amag.toFixed(4),
+    // derived: signed angular speed about the fitted swing axis (rad/s)
+    s: +s.toFixed(5),
+    axisX: +MEAS.axis[0].toFixed(4), axisY: +MEAS.axis[1].toFixed(4), axisZ: +MEAS.axis[2].toFixed(4),
+  });
   const sp = Math.abs(s);
   if (sp > MEAS.peakSpeed) MEAS.peakSpeed = sp;
   if (amag > MEAS.aMax) MEAS.aMax = amag;
@@ -597,6 +615,16 @@ function solveFromCycle(t) {
   MEAS.T = T; MEAS.thetaMax = thetaMax; MEAS.L = L; MEAS.r = r;
   MEAS.amps.push({ t, theta: thetaMax });
   if (MEAS.amps.length > 40) MEAS.amps.shift();
+  MEAS.cycles.push({
+    t: MEAS.t0 == null ? 0 : +(t - MEAS.t0).toFixed(3),
+    T: +T.toFixed(4),
+    thetaMaxDeg: +((thetaMax * 180) / Math.PI).toFixed(2),
+    L_m: +L.toFixed(4),
+    r_m: +r.toFixed(4),
+    wPeak: +wpeak.toFixed(4),
+    aMax: +MEAS.aMax.toFixed(4),
+    aMin: +(MEAS.aMin === Infinity ? 0 : MEAS.aMin).toFixed(4),
+  });
   MEAS.ready = true;
   renderMeasure();
 }
@@ -642,6 +670,47 @@ function renderMeasure() {
   if (dh) parts.push(dh);
   $$("mHint").textContent = parts.join(" ") || "Swing for a few cycles for a reading…";
   $$("applyBtn").disabled = !(MEAS.ready && MEAS.L > 0);
+  $$("downloadBtn").disabled = MEAS.samples.length === 0;
+}
+
+// bundle raw samples + per-cycle analysis + final estimate as JSON
+function downloadData() {
+  if (MEAS.samples.length === 0) { mStatus("No data recorded yet.", true); return; }
+  const s = MEAS.samples;
+  const dur = s.length ? s[s.length - 1].t : 0;
+  const data = {
+    meta: {
+      generatedAt: new Date().toISOString(),
+      userAgent: navigator.userAgent,
+      secureContext: window.isSecureContext,
+      g: MEAS.g,
+      units: "gyro deg/s, accel m/s², angle rad unless noted, lengths m",
+      nSamples: s.length,
+      durationSec: +dur.toFixed(2),
+      avgRateHz: dur > 0 ? +(s.length / dur).toFixed(1) : null,
+    },
+    finalEstimate: {
+      periodSec: +MEAS.T.toFixed(4),
+      swingAngleDeg: +((MEAS.thetaMax * 180) / Math.PI).toFixed(2),
+      effectiveLength_m: +MEAS.L.toFixed(4),
+      phoneRadius_m: +MEAS.r.toFixed(4),
+      radiusOverLength: MEAS.L > 0 ? +(MEAS.r / MEAS.L).toFixed(3) : null,
+      decayHint: decayHint(),
+    },
+    cycles: MEAS.cycles,
+    samples: s,
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  a.href = url;
+  a.download = "hammock-swing-" + stamp + ".json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  mStatus("Saved " + s.length + " samples over " + dur.toFixed(1) + " s to your downloads.");
 }
 
 // signed live trace (zero line in the middle)
@@ -709,6 +778,7 @@ async function startMeasuring() {
   }
   MEAS.on = true;
   MEAS.gotEvent = false;
+  MEAS.samples = []; MEAS.cycles = []; MEAS.t0 = null;
   MEAS.wbuf = []; MEAS.halfPeriods = []; MEAS.amps = [];
   MEAS.sbuf.fill(0); MEAS.lastCrossT = 0; MEAS.peakSpeed = 0;
   MEAS.aMax = 0; MEAS.aMin = Infinity; MEAS.prevS = 0; MEAS.ready = false;
@@ -737,7 +807,11 @@ function stopMeasuring() {
   window.removeEventListener("devicemotion", onMotion);
   const btn = $$("measBtn");
   btn.textContent = "Start measuring"; btn.classList.remove("recording");
-  mStatus(MEAS.ready ? "Stopped. Tap “Apply to simulator” to replay this swing above." : "Stopped.");
+  $$("downloadBtn").disabled = MEAS.samples.length === 0;
+  mStatus(
+    (MEAS.ready ? "Stopped. Tap “Apply to simulator” to replay this swing above." : "Stopped.") +
+      (MEAS.samples.length ? "  " + MEAS.samples.length + " samples ready to download." : ""),
+  );
 }
 
 // surface any uncaught error into the UI (no desktop console on the phone)
@@ -753,6 +827,10 @@ $$("measBtn").addEventListener("click", () => {
   } catch (e) {
     mStatus("Click handler threw: " + (e && (e.name + ": " + e.message)), true);
   }
+});
+$$("downloadBtn").addEventListener("click", () => {
+  try { downloadData(); }
+  catch (e) { mStatus("Download failed: " + (e && (e.name + ": " + e.message)), true); }
 });
 $$("applyBtn").addEventListener("click", () => {
   if (!(MEAS.L > 0)) return;
