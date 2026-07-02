@@ -20,15 +20,17 @@ function updateUnitLabels() {
   $("u_v").textContent = s + "/s";
   $("u_a").textContent = s + "/s²";
   $("u_j").textContent = s + "/s³";
+  $("u_s").textContent = s + "/s⁴";
   $("u_tv").textContent = s + "/s";
   $("u_ta").textContent = s + "/s²";
   $("u_tj").textContent = s + "/s³";
+  $("u_ts").textContent = s + "/s⁴";
   $("lenInput").value = fmtLen(L);
   $("lenInput").step = unit === "in" ? "1" : "0.1";
 }
 
 // peaks (direction-free magnitudes)
-let peak = { v: 0, a: 0, j: 0, gforce: 1, res_v: 0, res_a: 0, res_j: 0 };
+let peak = { v: 0, a: 0, j: 0, s: 0, gforce: 1, res_v: 0, res_a: 0, res_j: 0, res_s: 0 };
 
 // --- DOM ---
 const $ = (id) => document.getElementById(id);
@@ -81,7 +83,7 @@ function relaunch() {
   computePeriod();
 }
 function resetPeaks() {
-  peak = { v: 0, a: 0, j: 0, gforce: 1, res_v: 0, res_a: 0, res_j: 0 };
+  peak = { v: 0, a: 0, j: 0, s: 0, gforce: 1, res_v: 0, res_a: 0, res_j: 0, res_s: 0 };
   histV.fill(0);
   histA.fill(0);
   histAt.fill(0);
@@ -89,6 +91,9 @@ function resetPeaks() {
   histJ.fill(0);
   histJt.fill(0);
   histJr.fill(0);
+  histS.fill(0);
+  histSt.fill(0);
+  histSr.fill(0);
 }
 
 // --- accurate period via arithmetic-geometric mean (complete elliptic K) ---
@@ -117,13 +122,18 @@ function derive() {
   const at = L * alpha; // tangential, signed
   const ac = L * omega * omega; // centripetal, toward pivot (+)
   const amag = Math.hypot(at, ac);
+  const alphaDDot = -(g / L) * (Math.cos(theta) * alpha - Math.sin(theta) * omega * omega);
   // jerk
   const jt = L * (alphaDot - omega ** 3); // tangential, signed
   const jr = -3 * L * omega * alpha; // along outward radial, signed
   const jmag = Math.hypot(jt, jr);
+  // snap
+  const st = L * (alphaDDot - 6 * omega * omega * alpha); // tangential, signed
+  const sr = L * (omega ** 4 - 3 * alpha * alpha - 4 * omega * alphaDot); // outward radial, signed
+  const smag = Math.hypot(st, sr);
   // felt g-force = proper acceleration / g = (g cosθ + Lω²)/g, purely radial
   const gforce = (g * Math.cos(theta) + L * omega * omega) / g;
-  return { alpha, at, ac, amag, vt, vmag, jt, jr, jmag, gforce };
+  return { alpha, at, ac, amag, vt, vmag, jt, jr, jmag, st, sr, smag, gforce };
 }
 
 // --- RK4 integrator for (theta, omega) ---
@@ -243,12 +253,18 @@ function drawStage(d) {
     ];
     resKey = "res_a";
   } // ac drawn toward pivot
-  else {
+  else if (mode === "j") {
     comps = [
       ["tan", d.jt, "--tan"],
       ["rad", d.jr, "--cen"],
     ];
     resKey = "res_j";
+  } else {
+    comps = [
+      ["tan", d.st, "--tan"],
+      ["rad", d.sr, "--cen"],
+    ];
+    resKey = "res_s";
   }
 
   // resultant vector (world units) for scaling + drawing
@@ -300,12 +316,16 @@ const histV = new Array(N).fill(0),
   histAc = new Array(N).fill(0),
   histJ = new Array(N).fill(0),
   histJt = new Array(N).fill(0),
-  histJr = new Array(N).fill(0);
-let CV, CA, CJ;
+  histJr = new Array(N).fill(0),
+  histS = new Array(N).fill(0),
+  histSt = new Array(N).fill(0),
+  histSr = new Array(N).fill(0);
+let CV, CA, CJ, CS;
 function sizeTraces() {
   CV = fit($("cv"), 120);
   CA = fit($("ca"), 120);
   CJ = fit($("cj"), 120);
+  CS = fit($("cs"), 120);
 }
 // series: [{hist, color, width?}, ...]  — drawn in order (last on top)
 function drawTrace(T, series, peakVal) {
@@ -360,6 +380,7 @@ function loop(now) {
   peak.v = Math.max(peak.v, d.vmag);
   peak.a = Math.max(peak.a, d.amag);
   peak.j = Math.max(peak.j, d.jmag);
+  peak.s = Math.max(peak.s, d.smag);
   peak.gforce = Math.max(peak.gforce, d.gforce);
   // histories
   histV.push(d.vmag);
@@ -376,6 +397,12 @@ function loop(now) {
   histJt.shift();
   histJr.push(Math.abs(d.jr));
   histJr.shift();
+  histS.push(d.smag);
+  histS.shift();
+  histSt.push(Math.abs(d.st));
+  histSt.shift();
+  histSr.push(Math.abs(d.sr));
+  histSr.shift();
 
   // table
   $("v_t").textContent = toU(d.vmag).toFixed(2);
@@ -389,6 +416,10 @@ function loop(now) {
   $("j_c").textContent = toU(Math.abs(d.jr)).toFixed(1);
   $("j_m").textContent = toU(d.jmag).toFixed(1);
   $("j_p").textContent = toU(peak.j).toFixed(1);
+  $("s_t").textContent = toU(Math.abs(d.st)).toFixed(1);
+  $("s_c").textContent = toU(Math.abs(d.sr)).toFixed(1);
+  $("s_m").textContent = toU(d.smag).toFixed(1);
+  $("s_p").textContent = toU(peak.s).toFixed(1);
   // gforce
   $("gNow").textContent = d.gforce.toFixed(2);
   $("gPk").textContent = peak.gforce.toFixed(2);
@@ -403,6 +434,10 @@ function loop(now) {
   $("tj_c").textContent = toU(Math.abs(d.jr)).toFixed(1);
   $("tj_m").textContent = toU(d.jmag).toFixed(1);
   $("tjp").textContent = toU(peak.j).toFixed(1);
+  $("ts_t").textContent = toU(Math.abs(d.st)).toFixed(1);
+  $("ts_c").textContent = toU(Math.abs(d.sr)).toFixed(1);
+  $("ts_m").textContent = toU(d.smag).toFixed(1);
+  $("tsp").textContent = toU(peak.s).toFixed(1);
 
   // render
   drawStage(d);
@@ -428,6 +463,15 @@ function loop(now) {
       { hist: histJ, color: resColor, width: 2.5 },
     ],
     peak.j,
+  );
+  drawTrace(
+    CS,
+    [
+      { hist: histSt, color: tanColor, width: 1.5 },
+      { hist: histSr, color: cenColor, width: 1.5 },
+      { hist: histS, color: resColor, width: 2.5 },
+    ],
+    peak.s,
   );
 
   if (playing) requestAnimationFrame(loop);

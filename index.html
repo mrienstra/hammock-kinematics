@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hammock kinematics — velocity, acceleration, jerk</title>
+  <title>Hammock kinematics — velocity, acceleration, jerk, snap</title>
   <link href=hammock_acceleration_simulator.css rel=stylesheet />
 </head>
 
@@ -12,7 +12,7 @@
   <div class="wrap">
     <header>
       <h1>Hammock kinematics</h1>
-      <p>A frictionless pendulum bob. Velocity, acceleration, and jerk — each split into tangential and radial
+      <p>A frictionless pendulum bob. Velocity, acceleration, jerk, and snap — each split into tangential and radial
         (centripetal) parts, plus its direction-free magnitude.</p>
     </header>
 
@@ -54,7 +54,7 @@
       </div>
       <canvas id="mTrace" height="120" hidden></canvas>
       <div class="measure-foot" id="measFoot" hidden>
-        <span class="m-hint" id="mHint">Warming up — swing for a few cycles…</span>
+        <span class="m-hint" id="mHint"></span>
         <div class="m-foot-btns">
           <button id="downloadBtn" disabled>Download data</button>
           <button id="applyBtn" disabled>Apply to simulator &uarr;</button>
@@ -92,6 +92,7 @@
           <button data-mode="v" class="on">Velocity</button>
           <button data-mode="a">Acceleration</button>
           <button data-mode="j">Jerk</button>
+          <button data-mode="s">Snap</button>
         </div>
         <canvas id="stage" class="stagecanvas"></canvas>
         <div class="legend">
@@ -142,6 +143,13 @@
               <td class="c-res" id="j_m">0.0</td>
               <td id="j_p">0.0</td>
             </tr>
+            <tr>
+              <td class="q">Snap<small id="u_s">m/s⁴</small></td>
+              <td class="c-tan" id="s_t">0.0</td>
+              <td class="c-cen" id="s_c">0.0</td>
+              <td class="c-res" id="s_m">0.0</td>
+              <td id="s_p">0.0</td>
+            </tr>
           </tbody>
         </table>
         <p class="note">Period ≈ <b id="period" style="font-family:var(--mono)">—</b> s.</p>
@@ -178,6 +186,18 @@
           <div><span id="u_tj">m/s³</span> &nbsp;pk <span id="tjp">0.0</span></div>
         </div>
         <canvas id="cj" height="120"></canvas>
+      </div>
+      <div class="trace">
+        <h3>Snap</h3>
+        <div class="sub trace-vals">
+          <div class="trace-comps">
+            <span class="c-tan">tan <span id="ts_t">0.0</span></span>
+            <span class="c-cen">cen <span id="ts_c">0.0</span></span>
+            <span class="c-res">|&middot;| <span id="ts_m">0.0</span></span>
+          </div>
+          <div><span id="u_ts">m/s⁴</span> &nbsp;pk <span id="tsp">0.0</span></div>
+        </div>
+        <canvas id="cs" height="120"></canvas>
       </div>
     </div>
   </div>
