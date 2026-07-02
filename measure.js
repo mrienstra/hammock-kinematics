@@ -47,7 +47,12 @@ const MEAS = {
   // full recording for export
   samples: [], // per-event raw + derived
   cycles: [], // per-cycle solved estimates
-  t0: null, // first event timestamp (s), for relative time
+  t0: null, // analysis time origin (s): first RECORDED sample
+  // warm-up: ignore the first skipSec so repositioning / pocketing the
+  // phone doesn't pollute the fit
+  warm: true,
+  skipSec: 3,
+  startT: null, // timestamp of the very first event (warm-up clock)
 };
 
 const $$ = (id) => document.getElementById(id);
@@ -87,6 +92,16 @@ function periodToLength(T, thetaMax) {
   return (MEAS.g * (T / (2 * Math.PI)) ** 2) / (bigOverSmall * bigOverSmall);
 }
 
+// clear the recording / per-cycle analysis state (but keep the axis buffer
+// warm so it stays locked). t0 = new analysis time origin.
+function resetAnalysis(t0) {
+  MEAS.samples = []; MEAS.cycles = []; MEAS.amps = [];
+  MEAS.halfPeriods = [];
+  MEAS.lastCrossT = 0; MEAS.peakSpeed = 0; MEAS.aMax = 0; MEAS.aMin = Infinity;
+  MEAS.prevS = 0; MEAS.ready = false;
+  MEAS.t0 = t0 === undefined ? null : t0;
+}
+
 function onMotion(ev) {
   if (!MEAS.on) return;
   const rr = ev.rotationRate;
@@ -102,14 +117,16 @@ function onMotion(ev) {
     );
     return;
   }
-  if (!MEAS.rawShown) { MEAS.rawShown = true; mStatus("Recording… lie back and let it swing. Numbers refine each cycle."); }
   let dt = ev.interval || 1 / 60;
   if (dt <= 0 || dt > 0.1) dt = 1 / 60;
   const D = Math.PI / 180;
   const w = [rr.beta * D, rr.gamma * D, rr.alpha * D]; // deg/s → rad/s
   const amag = Math.hypot(ai.x, ai.y, ai.z);
+  const t = ev.timeStamp / 1000;
+  if (MEAS.startT == null) MEAS.startT = t;
 
-  // maintain the principal-axis estimate
+  // maintain the principal-axis estimate + live trace, even during warm-up so
+  // the signal visibly moves while the user repositions
   MEAS.wbuf.push(w);
   if (MEAS.wbuf.length > MEAS.WBUF_MAX) MEAS.wbuf.shift();
   if (++MEAS.sinceAxis >= 8 && MEAS.wbuf.length >= 30) {
@@ -117,12 +134,19 @@ function onMotion(ev) {
     MEAS.sinceAxis = 0;
   }
   const s = w[0] * MEAS.axis[0] + w[1] * MEAS.axis[1] + w[2] * MEAS.axis[2];
-
-  // live trace of signed angular speed
   MEAS.sbuf.push(s); MEAS.sbuf.shift();
 
-  // half-cycle tracking
-  const t = ev.timeStamp / 1000;
+  // warm-up window: preview the trace but don't record or analyze yet
+  if (MEAS.warm) {
+    const remain = MEAS.skipSec - (t - MEAS.startT);
+    if (remain > 0) {
+      mStatus("Warming up — reposition / pocket the phone now. Recording in " + remain.toFixed(1) + " s…");
+      return;
+    }
+    MEAS.warm = false; // discard the warm-up; the clock starts clean here
+    resetAnalysis(t);
+  }
+  if (!MEAS.rawShown) { MEAS.rawShown = true; mStatus("Recording… lie back and let it swing. Numbers refine each cycle."); }
   if (MEAS.t0 == null) MEAS.t0 = t;
 
   // full recording (raw + derived) for later inspection
@@ -352,6 +376,7 @@ function downloadData() {
       userAgent: navigator.userAgent,
       secureContext: window.isSecureContext,
       g: MEAS.g,
+      skippedSec: MEAS.skipSec,
       units: "gyro deg/s, accel m/s², angle rad unless noted, lengths m",
       nSamples: s.length,
       durationSec: +dur.toFixed(2),
@@ -446,16 +471,19 @@ async function startMeasuring() {
   }
   MEAS.on = true;
   MEAS.gotEvent = false;
-  MEAS.samples = []; MEAS.cycles = []; MEAS.t0 = null;
-  MEAS.wbuf = []; MEAS.halfPeriods = []; MEAS.amps = [];
-  MEAS.sbuf.fill(0); MEAS.lastCrossT = 0; MEAS.peakSpeed = 0;
-  MEAS.aMax = 0; MEAS.aMin = Infinity; MEAS.prevS = 0; MEAS.ready = false;
   MEAS.rawShown = false;
+  // warm-up: ignore the first N seconds so repositioning doesn't pollute the fit
+  MEAS.skipSec = Math.max(0, Math.min(120, parseFloat($("skipInput").value) || 0));
+  MEAS.warm = true;
+  MEAS.startT = null;
+  MEAS.wbuf = []; MEAS.axis = [1, 0, 0]; MEAS.sinceAxis = 0; MEAS.sbuf.fill(0);
+  resetAnalysis(null);
   sizeMTrace();
   window.addEventListener("devicemotion", onMotion);
   mStatus("Permission OK — waiting for motion data…");
   const btn = $$("measBtn");
   btn.textContent = "Stop"; btn.classList.add("recording");
+  $("skipInput").disabled = true;
   renderMeasure();
   requestAnimationFrame(measureLoop);
   // watchdog: if no devicemotion events arrive, say so instead of hanging
@@ -475,6 +503,7 @@ function stopMeasuring() {
   window.removeEventListener("devicemotion", onMotion);
   const btn = $$("measBtn");
   btn.textContent = "Start measuring"; btn.classList.remove("recording");
+  $("skipInput").disabled = false;
   $$("downloadBtn").disabled = MEAS.samples.length === 0;
   mStatus(
     (MEAS.ready ? "Stopped. Tap “Apply to simulator” to replay this swing above." : "Stopped.") +

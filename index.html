@@ -23,7 +23,12 @@
           <p class="m-sub">Rest your phone on your body (stomach or between your legs is closest to your center of
             gravity) and let the hammock swing. Reads the gyroscope + accelerometer, then fills the simulator above.</p>
         </div>
-        <button id="measBtn">Start measuring</button>
+        <div class="m-head-ctl">
+          <label class="m-skip">Ignore first
+            <input type="number" id="skipInput" value="3" min="0" max="120" step="1"> s
+          </label>
+          <button id="measBtn">Start measuring</button>
+        </div>
       </div>
       <div id="measStatus" class="m-status"></div>
       <div class="measure-grid" id="measReadouts" hidden>
