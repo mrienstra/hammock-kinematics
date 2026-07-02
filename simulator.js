@@ -31,6 +31,7 @@ function updateUnitLabels() {
   $("u_tp").textContent = s + "/s⁶";
   $("lenInput").value = fmtLen(L);
   $("lenInput").step = unit === "in" ? "1" : "0.1";
+  if (!playing) renderStatic();
 }
 
 // peaks (direction-free magnitudes)
@@ -72,6 +73,7 @@ $("modeSeg").addEventListener("click", (e) => {
   if (!b) return;
   mode = b.dataset.mode;
   [...$("modeSeg").children].forEach((c) => c.classList.toggle("on", c === b));
+  if (!playing) renderStatic();
 });
 $("unitSeg").addEventListener("click", (e) => {
   const b = e.target.closest("button");
@@ -87,7 +89,10 @@ function relaunch() {
   computePeriod();
 }
 function resetPeaks() {
-  peak = { v: 0, a: 0, j: 0, s: 0, cr: 0, p: 0, gforce: 1, res_v: 0, res_a: 0, res_j: 0, res_s: 0, res_cr: 0, res_p: 0 };
+  // seed peaks from the current state so the reset value is the true instantaneous
+  // magnitude (not an arbitrary floor); res_* scale factors start at 0 and grow.
+  const d = derive();
+  peak = { v: d.vmag, a: d.amag, j: d.jmag, s: d.smag, cr: d.cmag, p: d.pmag, gforce: d.gforce, res_v: 0, res_a: 0, res_j: 0, res_s: 0, res_cr: 0, res_p: 0 };
   histV.fill(0);
   histA.fill(0);
   histAt.fill(0);
@@ -104,6 +109,7 @@ function resetPeaks() {
   histP.fill(0);
   histPt.fill(0);
   histPr.fill(0);
+  if (!playing) renderStatic();
 }
 
 // --- accurate period via arithmetic-geometric mean (complete elliptic K) ---
@@ -465,6 +471,12 @@ function loop(now) {
   histPr.push(Math.abs(d.pr));
   histPr.shift();
 
+  render(d);
+  if (playing) requestAnimationFrame(loop);
+}
+
+// draw + readouts for a given derived state (no state mutation — safe to call while paused)
+function render(d) {
   // table
   $("v_t").textContent = toU(d.vmag).toFixed(2);
   $("v_m").textContent = toU(d.vmag).toFixed(2);
@@ -568,8 +580,11 @@ function loop(now) {
     ],
     peak.p,
   );
+}
 
-  if (playing) requestAnimationFrame(loop);
+// redraw current state without advancing the simulation (used when paused)
+function renderStatic() {
+  render(derive());
 }
 
 // init
