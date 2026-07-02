@@ -369,7 +369,9 @@ function renderMeasure() {
   }
   const dh = analyzeDecay().hint;
   if (dh) parts.push(dh);
-  $$("mHint").textContent = parts.join(" · ") || "Swing for a few cycles for a reading…";
+  // leave the hint blank until there's a real reading — during warm-up the
+  // top status line already narrates the countdown
+  $$("mHint").textContent = parts.join(" · ");
   $$("applyBtn").disabled = !(MEAS.ready && MEAS.L > 0);
   $$("downloadBtn").disabled = MEAS.samples.length === 0;
 }
