@@ -134,45 +134,45 @@ function computePeriod() {
   $("period").textContent = T.toFixed(2);
 }
 
-// --- physics derivation at current state ---
-function derive() {
+// --- physics derivation at a given state (defaults to the live theta/omega) ---
+function derive(th = theta, om = omega) {
   const k = g / L;
-  const c = Math.cos(theta),
-    s = Math.sin(theta);
+  const c = Math.cos(th),
+    s = Math.sin(th);
   // time-derivatives of angular acceleration α = θ̈ = -(g/L)sinθ
   const alpha = -k * s;
-  const alphaDot = -k * c * omega; // α̇
-  const alphaDot2 = -k * (c * alpha - s * omega * omega); // α̈
-  const alphaDot3 = k * k * omega * (c * c - 3 * s * s) + k * c * omega ** 3; // α⃛
+  const alphaDot = -k * c * om; // α̇
+  const alphaDot2 = -k * (c * alpha - s * om * om); // α̈
+  const alphaDot3 = k * k * om * (c * c - 3 * s * s) + k * c * om ** 3; // α⃛
   const alphaDot4 =
     -(k ** 3) * s * (c * c - 3 * s * s) -
-    11 * k * k * s * c * omega * omega -
-    k * s * omega ** 4; // α⃜
+    11 * k * k * s * c * om * om -
+    k * s * om ** 4; // α⃜
   // velocity (tangential only)
-  const vt = L * omega;
+  const vt = L * om;
   const vmag = Math.abs(vt);
   // acceleration
   const at = L * alpha; // tangential, signed
-  const ac = L * omega * omega; // centripetal, toward pivot (+)
+  const ac = L * om * om; // centripetal, toward pivot (+)
   const amag = Math.hypot(at, ac);
   // jerk (3rd derivative of position)
-  const jt = L * (alphaDot - omega ** 3); // tangential, signed
-  const jr = -3 * L * omega * alpha; // along outward radial, signed
+  const jt = L * (alphaDot - om ** 3); // tangential, signed
+  const jr = -3 * L * om * alpha; // along outward radial, signed
   const jmag = Math.hypot(jt, jr);
   // snap (4th derivative)
-  const st = L * (alphaDot2 - 6 * omega * omega * alpha); // tangential, signed
-  const sr = L * (omega ** 4 - 3 * alpha * alpha - 4 * omega * alphaDot); // outward radial, signed
+  const st = L * (alphaDot2 - 6 * om * om * alpha); // tangential, signed
+  const sr = L * (om ** 4 - 3 * alpha * alpha - 4 * om * alphaDot); // outward radial, signed
   const smag = Math.hypot(st, sr);
   // crackle (5th derivative)
-  const crt = L * (alphaDot3 + omega ** 5 - 15 * omega * alpha * alpha - 10 * omega * omega * alphaDot); // tangential
-  const crr = L * (10 * omega ** 3 * alpha - 10 * alpha * alphaDot - 5 * omega * alphaDot2); // outward radial
+  const crt = L * (alphaDot3 + om ** 5 - 15 * om * alpha * alpha - 10 * om * om * alphaDot); // tangential
+  const crr = L * (10 * om ** 3 * alpha - 10 * alpha * alphaDot - 5 * om * alphaDot2); // outward radial
   const cmag = Math.hypot(crt, crr);
   // pop (6th derivative)
-  const pt = L * (alphaDot4 + 15 * omega ** 4 * alpha - 15 * alpha ** 3 - 60 * omega * alpha * alphaDot - 15 * omega * omega * alphaDot2); // tangential
-  const pr = L * (-(omega ** 6) + 45 * omega * omega * alpha * alpha + 20 * omega ** 3 * alphaDot - 10 * alphaDot * alphaDot - 15 * alpha * alphaDot2 - 6 * omega * alphaDot3); // outward radial
+  const pt = L * (alphaDot4 + 15 * om ** 4 * alpha - 15 * alpha ** 3 - 60 * om * alpha * alphaDot - 15 * om * om * alphaDot2); // tangential
+  const pr = L * (-(om ** 6) + 45 * om * om * alpha * alpha + 20 * om ** 3 * alphaDot - 10 * alphaDot * alphaDot - 15 * alpha * alphaDot2 - 6 * om * alphaDot3); // outward radial
   const pmag = Math.hypot(pt, pr);
   // felt g-force = proper acceleration / g = (g cosθ + Lω²)/g, purely radial
-  const gforce = (g * Math.cos(theta) + L * omega * omega) / g;
+  const gforce = (g * c + L * om * om) / g;
   return { alpha, at, ac, amag, vt, vmag, jt, jr, jmag, st, sr, smag, crt, crr, cmag, pt, pr, pmag, gforce };
 }
 
@@ -427,18 +427,8 @@ function drawTrace(T, series, peakVal) {
 let last = performance.now(),
   acc = 0;
 const FIXED = 1 / 600; // 600 Hz internal integration
-function loop(now) {
-  let frame = (now - last) / 1000;
-  last = now;
-  if (frame > 0.05) frame = 0.05;
-  acc += frame;
-  while (acc >= FIXED) {
-    step(FIXED);
-    acc -= FIXED;
-  }
-
-  const d = derive();
-  // peaks
+// fold one derived sample into the running min/max
+function accumulate(d) {
   peak.v = Math.max(peak.v, d.vmag);
   peak.a = Math.max(peak.a, d.amag);
   peak.j = Math.max(peak.j, d.jmag);
@@ -453,6 +443,30 @@ function loop(now) {
   low.cr = Math.min(low.cr, d.cmag);
   low.p = Math.min(low.p, d.pmag);
   low.gforce = Math.min(low.gforce, d.gforce);
+}
+function loop(now) {
+  let frame = (now - last) / 1000;
+  last = now;
+  if (frame > 0.05) frame = 0.05;
+  acc += frame;
+  // Sample min/max at the full 600 Hz integration rate (not once per animation
+  // frame) so brief extrema aren't missed. Where ω crosses zero (a turning point)
+  // the true speed & jerk are exactly 0; interpolate that instant so the min lands
+  // on it instead of on whichever sample happened to be nearest.
+  while (acc >= FIXED) {
+    const th0 = theta,
+      om0 = omega;
+    step(FIXED);
+    acc -= FIXED;
+    accumulate(derive());
+    if (om0 !== 0 && om0 * omega < 0) {
+      const f = om0 / (om0 - omega); // fraction of the step where ω = 0
+      accumulate(derive(th0 + (theta - th0) * f, 0));
+    }
+  }
+
+  const d = derive();
+  accumulate(d); // guarantee at least one sample per frame (e.g. very high refresh rates)
   // histories
   histV.push(d.vmag);
   histV.shift();
