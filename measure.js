@@ -101,7 +101,7 @@ function resetAnalysis(t0) {
   MEAS.samples = []; MEAS.cycles = []; MEAS.amps = [];
   MEAS.halfPeriods = [];
   MEAS.lastCrossT = 0; MEAS.peakSpeed = 0; MEAS.aMax = 0; MEAS.aMin = Infinity;
-  MEAS.prevS = 0; MEAS.ready = false;
+  MEAS.prevS = 0; MEAS.primed = false; MEAS.ready = false;
   MEAS.t0 = t0 === undefined ? null : t0;
 }
 
@@ -170,10 +170,16 @@ function onMotion(ev) {
   if (amag < MEAS.aMin) MEAS.aMin = amag;
 
   // detect a turning point: sign flip of s, gated by a min amplitude so
-  // noise near rest doesn't register as swings
+  // noise near rest doesn't register as swings. Skip detection on the very
+  // first sample after (re)start: recording begins mid-swing with s already
+  // one sign, so prevS=0 would fabricate a bogus crossing at t≈0 and the
+  // first recorded half-period would be a fragment (poisons the T average).
   const gate = Math.max(0.25, 0.35 * MEAS.peakSpeed);
-  if (MEAS.prevS <= 0 && s > 0 && MEAS.peakSpeed > gate) registerHalf(t);
-  else if (MEAS.prevS >= 0 && s < 0 && MEAS.peakSpeed > gate) registerHalf(t);
+  if (MEAS.primed) {
+    if (MEAS.prevS <= 0 && s > 0 && MEAS.peakSpeed > gate) registerHalf(t);
+    else if (MEAS.prevS >= 0 && s < 0 && MEAS.peakSpeed > gate) registerHalf(t);
+  }
+  MEAS.primed = true;
   MEAS.prevS = s;
 }
 
