@@ -453,6 +453,13 @@ canvas {
   color: var(--muted);
 }
 
+.gwrap .g-abs {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
 /* table */
 table {
   width: 100%;
@@ -490,6 +497,10 @@ tbody tr:last-child td {
 .q {
   font-family: var(--sans);
   font-weight: 500;
+}
+
+.c-min {
+  color: var(--muted);
 }
 
 .q small {

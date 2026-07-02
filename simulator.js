@@ -31,6 +31,7 @@ function updateUnitLabels() {
   $("u_tp").textContent = s + "/s⁶";
   $("u_g").textContent = s + "/s²";
   $("u_gp").textContent = s + "/s²";
+  $("u_gm").textContent = s + "/s²";
   $("lenInput").value = fmtLen(L);
   $("lenInput").step = unit === "in" ? "1" : "0.1";
   if (!playing) renderStatic();
@@ -38,6 +39,8 @@ function updateUnitLabels() {
 
 // peaks (direction-free magnitudes)
 let peak = { v: 0, a: 0, j: 0, s: 0, cr: 0, p: 0, gforce: 1, res_v: 0, res_a: 0, res_j: 0, res_s: 0, res_cr: 0, res_p: 0 };
+// running minimums of each magnitude
+let low = { v: Infinity, a: Infinity, j: Infinity, s: Infinity, cr: Infinity, p: Infinity, gforce: Infinity };
 
 // --- DOM ---
 const $ = (id) => document.getElementById(id);
@@ -95,6 +98,7 @@ function resetPeaks() {
   // magnitude (not an arbitrary floor); res_* scale factors start at 0 and grow.
   const d = derive();
   peak = { v: d.vmag, a: d.amag, j: d.jmag, s: d.smag, cr: d.cmag, p: d.pmag, gforce: d.gforce, res_v: 0, res_a: 0, res_j: 0, res_s: 0, res_cr: 0, res_p: 0 };
+  low = { v: d.vmag, a: d.amag, j: d.jmag, s: d.smag, cr: d.cmag, p: d.pmag, gforce: d.gforce };
   histV.fill(0);
   histA.fill(0);
   histAt.fill(0);
@@ -442,6 +446,13 @@ function loop(now) {
   peak.cr = Math.max(peak.cr, d.cmag);
   peak.p = Math.max(peak.p, d.pmag);
   peak.gforce = Math.max(peak.gforce, d.gforce);
+  low.v = Math.min(low.v, d.vmag);
+  low.a = Math.min(low.a, d.amag);
+  low.j = Math.min(low.j, d.jmag);
+  low.s = Math.min(low.s, d.smag);
+  low.cr = Math.min(low.cr, d.cmag);
+  low.p = Math.min(low.p, d.pmag);
+  low.gforce = Math.min(low.gforce, d.gforce);
   // histories
   histV.push(d.vmag);
   histV.shift();
@@ -508,11 +519,21 @@ function render(d) {
   $("p_c").textContent = toU(Math.abs(d.pr)).toFixed(1);
   $("p_m").textContent = toU(d.pmag).toFixed(1);
   $("p_p").textContent = toU(peak.p).toFixed(1);
+  // min column (always shown, including zeros)
+  $("v_min").textContent = toU(low.v).toFixed(2);
+  $("a_min").textContent = toU(low.a).toFixed(2);
+  $("j_min").textContent = toU(low.j).toFixed(1);
+  $("s_min").textContent = toU(low.s).toFixed(1);
+  $("cr_min").textContent = toU(low.cr).toFixed(1);
+  $("p_min").textContent = toU(low.p).toFixed(1);
   // gforce — both as a multiple of g and as an absolute acceleration in the selected unit
   $("gNow").textContent = d.gforce.toFixed(2);
   $("gPk").textContent = peak.gforce.toFixed(2);
   $("gNowU").textContent = toU(d.gforce * g).toFixed(2);
   $("gPkU").textContent = toU(peak.gforce * g).toFixed(2);
+  // gforce min (shown as ×g and absolute)
+  $("gMin").textContent = low.gforce.toFixed(2);
+  $("gMinU").textContent = toU(low.gforce * g).toFixed(2);
   // trace readouts
   $("tv").textContent = toU(d.vmag).toFixed(2);
   $("tvp").textContent = toU(peak.v).toFixed(2);
@@ -538,6 +559,14 @@ function render(d) {
   $("tpp").textContent = toU(peak.p).toFixed(1);
   $("tg").textContent = d.gforce.toFixed(2);
   $("tgp").textContent = peak.gforce.toFixed(2);
+  // trace min readouts
+  $("tvmin").textContent = toU(low.v).toFixed(2);
+  $("tamin").textContent = toU(low.a).toFixed(2);
+  $("tjmin").textContent = toU(low.j).toFixed(1);
+  $("tsmin").textContent = toU(low.s).toFixed(1);
+  $("tcmin").textContent = toU(low.cr).toFixed(1);
+  $("tpmin").textContent = toU(low.p).toFixed(1);
+  $("tgmin").textContent = low.gforce.toFixed(2);
 
   // render
   drawStage(d);

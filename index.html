@@ -85,7 +85,7 @@
       </div>
       <div class="btns">
         <button id="playBtn">Pause</button>
-        <button id="resetBtn">Reset peaks</button>
+        <button id="resetBtn">Reset min/max</button>
       </div>
     </div>
 
@@ -112,7 +112,9 @@
             <div class="big"><span id="gNow">1.00</span> &times; g</div>
             <div class="g-abs"><span id="gNowU">9.81</span> <span id="u_g">m/s²</span></div>
           </div>
-          <div class="pk">peak<br><span id="gPk">1.00</span> &times; g<br>
+          <div class="pk">min<br><span id="gMin">1.00</span> &times; g<br>
+            <span class="g-abs"><span id="gMinU">9.81</span> <span id="u_gm">m/s²</span></span></div>
+          <div class="pk">max<br><span id="gPk">1.00</span> &times; g<br>
             <span class="g-abs"><span id="gPkU">9.81</span> <span id="u_gp">m/s²</span></span></div>
         </div>
       </div>
@@ -126,7 +128,8 @@
               <th class="c-tan">Tangential</th>
               <th class="c-cen">Centripetal</th>
               <th class="c-res">Magnitude</th>
-              <th>Peak</th>
+              <th>Min</th>
+              <th>Max</th>
             </tr>
           </thead>
           <tbody>
@@ -135,6 +138,7 @@
               <td class="c-tan" id="v_t">0.00</td>
               <td class="zero" id="v_c">0 &mdash; always</td>
               <td class="c-res" id="v_m">0.00</td>
+              <td class="c-min" id="v_min">0.00</td>
               <td id="v_p">0.00</td>
             </tr>
             <tr>
@@ -142,6 +146,7 @@
               <td class="c-tan" id="a_t">0.00</td>
               <td class="c-cen" id="a_c">0.00</td>
               <td class="c-res" id="a_m">0.00</td>
+              <td class="c-min" id="a_min">0.00</td>
               <td id="a_p">0.00</td>
             </tr>
             <tr>
@@ -149,6 +154,7 @@
               <td class="c-tan" id="j_t">0.0</td>
               <td class="c-cen" id="j_c">0.0</td>
               <td class="c-res" id="j_m">0.0</td>
+              <td class="c-min" id="j_min">0.0</td>
               <td id="j_p">0.0</td>
             </tr>
             <tr>
@@ -156,6 +162,7 @@
               <td class="c-tan" id="s_t">0.0</td>
               <td class="c-cen" id="s_c">0.0</td>
               <td class="c-res" id="s_m">0.0</td>
+              <td class="c-min" id="s_min">0.0</td>
               <td id="s_p">0.0</td>
             </tr>
             <tr>
@@ -163,6 +170,7 @@
               <td class="c-tan" id="cr_t">0.0</td>
               <td class="c-cen" id="cr_c">0.0</td>
               <td class="c-res" id="cr_m">0.0</td>
+              <td class="c-min" id="cr_min">0.0</td>
               <td id="cr_p">0.0</td>
             </tr>
             <tr>
@@ -170,6 +178,7 @@
               <td class="c-tan" id="p_t">0.0</td>
               <td class="c-cen" id="p_c">0.0</td>
               <td class="c-res" id="p_m">0.0</td>
+              <td class="c-min" id="p_min">0.0</td>
               <td id="p_p">0.0</td>
             </tr>
           </tbody>
@@ -182,12 +191,12 @@
     <div class="panel traces">
       <div class="trace">
         <h3>Felt g-force <span class="v c-res" id="tg">1.00</span></h3>
-        <div class="sub">&times; g &nbsp;·&nbsp; peak <span id="tgp">1.00</span></div>
+        <div class="sub">&times; g &nbsp;·&nbsp; min <span id="tgmin">1.00</span> · max <span id="tgp">1.00</span></div>
         <canvas id="cg" height="120"></canvas>
       </div>
       <div class="trace">
         <h3>Velocity <span class="v c-res" id="tv">0.00</span></h3>
-        <div class="sub"><span id="u_tv">m/s</span> &nbsp;·&nbsp; peak <span id="tvp">0.00</span></div>
+        <div class="sub"><span id="u_tv">m/s</span> &nbsp;·&nbsp; min <span id="tvmin">0.00</span> · max <span id="tvp">0.00</span></div>
         <canvas id="cv" height="120"></canvas>
       </div>
       <div class="trace">
@@ -198,7 +207,7 @@
             <span class="c-cen">cen <span id="ta_c">0.00</span></span>
             <span class="c-res">|&middot;| <span id="ta_m">0.00</span></span>
           </div>
-          <div><span id="u_ta">m/s²</span> &nbsp;pk <span id="tap">0.00</span></div>
+          <div><span id="u_ta">m/s²</span> &nbsp;min <span id="tamin">0.00</span> · max <span id="tap">0.00</span></div>
         </div>
         <canvas id="ca" height="120"></canvas>
       </div>
@@ -210,7 +219,7 @@
             <span class="c-cen">cen <span id="tj_c">0.0</span></span>
             <span class="c-res">|&middot;| <span id="tj_m">0.0</span></span>
           </div>
-          <div><span id="u_tj">m/s³</span> &nbsp;pk <span id="tjp">0.0</span></div>
+          <div><span id="u_tj">m/s³</span> &nbsp;min <span id="tjmin">0.0</span> · max <span id="tjp">0.0</span></div>
         </div>
         <canvas id="cj" height="120"></canvas>
       </div>
@@ -222,7 +231,7 @@
             <span class="c-cen">cen <span id="ts_c">0.0</span></span>
             <span class="c-res">|&middot;| <span id="ts_m">0.0</span></span>
           </div>
-          <div><span id="u_ts">m/s⁴</span> &nbsp;pk <span id="tsp">0.0</span></div>
+          <div><span id="u_ts">m/s⁴</span> &nbsp;min <span id="tsmin">0.0</span> · max <span id="tsp">0.0</span></div>
         </div>
         <canvas id="cs" height="120"></canvas>
       </div>
@@ -234,7 +243,7 @@
             <span class="c-cen">cen <span id="tc_c">0.0</span></span>
             <span class="c-res">|&middot;| <span id="tc_m">0.0</span></span>
           </div>
-          <div><span id="u_tc">m/s⁵</span> &nbsp;pk <span id="tcp">0.0</span></div>
+          <div><span id="u_tc">m/s⁵</span> &nbsp;min <span id="tcmin">0.0</span> · max <span id="tcp">0.0</span></div>
         </div>
         <canvas id="cc" height="120"></canvas>
       </div>
@@ -246,7 +255,7 @@
             <span class="c-cen">cen <span id="tp_c">0.0</span></span>
             <span class="c-res">|&middot;| <span id="tp_m">0.0</span></span>
           </div>
-          <div><span id="u_tp">m/s⁶</span> &nbsp;pk <span id="tpp">0.0</span></div>
+          <div><span id="u_tp">m/s⁶</span> &nbsp;min <span id="tpmin">0.0</span> · max <span id="tpp">0.0</span></div>
         </div>
         <canvas id="cp" height="120"></canvas>
       </div>
