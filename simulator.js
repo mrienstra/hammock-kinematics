@@ -21,16 +21,20 @@ function updateUnitLabels() {
   $("u_a").textContent = s + "/s²";
   $("u_j").textContent = s + "/s³";
   $("u_s").textContent = s + "/s⁴";
+  $("u_c").textContent = s + "/s⁵";
+  $("u_p").textContent = s + "/s⁶";
   $("u_tv").textContent = s + "/s";
   $("u_ta").textContent = s + "/s²";
   $("u_tj").textContent = s + "/s³";
   $("u_ts").textContent = s + "/s⁴";
+  $("u_tc").textContent = s + "/s⁵";
+  $("u_tp").textContent = s + "/s⁶";
   $("lenInput").value = fmtLen(L);
   $("lenInput").step = unit === "in" ? "1" : "0.1";
 }
 
 // peaks (direction-free magnitudes)
-let peak = { v: 0, a: 0, j: 0, s: 0, gforce: 1, res_v: 0, res_a: 0, res_j: 0, res_s: 0 };
+let peak = { v: 0, a: 0, j: 0, s: 0, cr: 0, p: 0, gforce: 1, res_v: 0, res_a: 0, res_j: 0, res_s: 0, res_cr: 0, res_p: 0 };
 
 // --- DOM ---
 const $ = (id) => document.getElementById(id);
@@ -83,7 +87,7 @@ function relaunch() {
   computePeriod();
 }
 function resetPeaks() {
-  peak = { v: 0, a: 0, j: 0, s: 0, gforce: 1, res_v: 0, res_a: 0, res_j: 0, res_s: 0 };
+  peak = { v: 0, a: 0, j: 0, s: 0, cr: 0, p: 0, gforce: 1, res_v: 0, res_a: 0, res_j: 0, res_s: 0, res_cr: 0, res_p: 0 };
   histV.fill(0);
   histA.fill(0);
   histAt.fill(0);
@@ -94,6 +98,12 @@ function resetPeaks() {
   histS.fill(0);
   histSt.fill(0);
   histSr.fill(0);
+  histC.fill(0);
+  histCt.fill(0);
+  histCr.fill(0);
+  histP.fill(0);
+  histPt.fill(0);
+  histPr.fill(0);
 }
 
 // --- accurate period via arithmetic-geometric mean (complete elliptic K) ---
@@ -113,8 +123,18 @@ function computePeriod() {
 
 // --- physics derivation at current state ---
 function derive() {
-  const alpha = -(g / L) * Math.sin(theta);
-  const alphaDot = -(g / L) * Math.cos(theta) * omega;
+  const k = g / L;
+  const c = Math.cos(theta),
+    s = Math.sin(theta);
+  // time-derivatives of angular acceleration α = θ̈ = -(g/L)sinθ
+  const alpha = -k * s;
+  const alphaDot = -k * c * omega; // α̇
+  const alphaDot2 = -k * (c * alpha - s * omega * omega); // α̈
+  const alphaDot3 = k * k * omega * (c * c - 3 * s * s) + k * c * omega ** 3; // α⃛
+  const alphaDot4 =
+    -(k ** 3) * s * (c * c - 3 * s * s) -
+    11 * k * k * s * c * omega * omega -
+    k * s * omega ** 4; // α⃜
   // velocity (tangential only)
   const vt = L * omega;
   const vmag = Math.abs(vt);
@@ -122,18 +142,25 @@ function derive() {
   const at = L * alpha; // tangential, signed
   const ac = L * omega * omega; // centripetal, toward pivot (+)
   const amag = Math.hypot(at, ac);
-  const alphaDDot = -(g / L) * (Math.cos(theta) * alpha - Math.sin(theta) * omega * omega);
-  // jerk
+  // jerk (3rd derivative of position)
   const jt = L * (alphaDot - omega ** 3); // tangential, signed
   const jr = -3 * L * omega * alpha; // along outward radial, signed
   const jmag = Math.hypot(jt, jr);
-  // snap
-  const st = L * (alphaDDot - 6 * omega * omega * alpha); // tangential, signed
+  // snap (4th derivative)
+  const st = L * (alphaDot2 - 6 * omega * omega * alpha); // tangential, signed
   const sr = L * (omega ** 4 - 3 * alpha * alpha - 4 * omega * alphaDot); // outward radial, signed
   const smag = Math.hypot(st, sr);
+  // crackle (5th derivative)
+  const crt = L * (alphaDot3 + omega ** 5 - 15 * omega * alpha * alpha - 10 * omega * omega * alphaDot); // tangential
+  const crr = L * (10 * omega ** 3 * alpha - 10 * alpha * alphaDot - 5 * omega * alphaDot2); // outward radial
+  const cmag = Math.hypot(crt, crr);
+  // pop (6th derivative)
+  const pt = L * (alphaDot4 + 15 * omega ** 4 * alpha - 15 * alpha ** 3 - 60 * omega * alpha * alphaDot - 15 * omega * omega * alphaDot2); // tangential
+  const pr = L * (-(omega ** 6) + 45 * omega * omega * alpha * alpha + 20 * omega ** 3 * alphaDot - 10 * alphaDot * alphaDot - 15 * alpha * alphaDot2 - 6 * omega * alphaDot3); // outward radial
+  const pmag = Math.hypot(pt, pr);
   // felt g-force = proper acceleration / g = (g cosθ + Lω²)/g, purely radial
   const gforce = (g * Math.cos(theta) + L * omega * omega) / g;
-  return { alpha, at, ac, amag, vt, vmag, jt, jr, jmag, st, sr, smag, gforce };
+  return { alpha, at, ac, amag, vt, vmag, jt, jr, jmag, st, sr, smag, crt, crr, cmag, pt, pr, pmag, gforce };
 }
 
 // --- RK4 integrator for (theta, omega) ---
@@ -259,12 +286,24 @@ function drawStage(d) {
       ["rad", d.jr, "--cen"],
     ];
     resKey = "res_j";
-  } else {
+  } else if (mode === "s") {
     comps = [
       ["tan", d.st, "--tan"],
       ["rad", d.sr, "--cen"],
     ];
     resKey = "res_s";
+  } else if (mode === "cr") {
+    comps = [
+      ["tan", d.crt, "--tan"],
+      ["rad", d.crr, "--cen"],
+    ];
+    resKey = "res_cr";
+  } else {
+    comps = [
+      ["tan", d.pt, "--tan"],
+      ["rad", d.pr, "--cen"],
+    ];
+    resKey = "res_p";
   }
 
   // resultant vector (world units) for scaling + drawing
@@ -319,13 +358,21 @@ const histV = new Array(N).fill(0),
   histJr = new Array(N).fill(0),
   histS = new Array(N).fill(0),
   histSt = new Array(N).fill(0),
-  histSr = new Array(N).fill(0);
-let CV, CA, CJ, CS;
+  histSr = new Array(N).fill(0),
+  histC = new Array(N).fill(0),
+  histCt = new Array(N).fill(0),
+  histCr = new Array(N).fill(0),
+  histP = new Array(N).fill(0),
+  histPt = new Array(N).fill(0),
+  histPr = new Array(N).fill(0);
+let CV, CA, CJ, CS, CC, CP;
 function sizeTraces() {
   CV = fit($("cv"), 120);
   CA = fit($("ca"), 120);
   CJ = fit($("cj"), 120);
   CS = fit($("cs"), 120);
+  CC = fit($("cc"), 120);
+  CP = fit($("cp"), 120);
 }
 // series: [{hist, color, width?}, ...]  — drawn in order (last on top)
 function drawTrace(T, series, peakVal) {
@@ -381,6 +428,8 @@ function loop(now) {
   peak.a = Math.max(peak.a, d.amag);
   peak.j = Math.max(peak.j, d.jmag);
   peak.s = Math.max(peak.s, d.smag);
+  peak.cr = Math.max(peak.cr, d.cmag);
+  peak.p = Math.max(peak.p, d.pmag);
   peak.gforce = Math.max(peak.gforce, d.gforce);
   // histories
   histV.push(d.vmag);
@@ -403,6 +452,18 @@ function loop(now) {
   histSt.shift();
   histSr.push(Math.abs(d.sr));
   histSr.shift();
+  histC.push(d.cmag);
+  histC.shift();
+  histCt.push(Math.abs(d.crt));
+  histCt.shift();
+  histCr.push(Math.abs(d.crr));
+  histCr.shift();
+  histP.push(d.pmag);
+  histP.shift();
+  histPt.push(Math.abs(d.pt));
+  histPt.shift();
+  histPr.push(Math.abs(d.pr));
+  histPr.shift();
 
   // table
   $("v_t").textContent = toU(d.vmag).toFixed(2);
@@ -420,6 +481,14 @@ function loop(now) {
   $("s_c").textContent = toU(Math.abs(d.sr)).toFixed(1);
   $("s_m").textContent = toU(d.smag).toFixed(1);
   $("s_p").textContent = toU(peak.s).toFixed(1);
+  $("cr_t").textContent = toU(Math.abs(d.crt)).toFixed(1);
+  $("cr_c").textContent = toU(Math.abs(d.crr)).toFixed(1);
+  $("cr_m").textContent = toU(d.cmag).toFixed(1);
+  $("cr_p").textContent = toU(peak.cr).toFixed(1);
+  $("p_t").textContent = toU(Math.abs(d.pt)).toFixed(1);
+  $("p_c").textContent = toU(Math.abs(d.pr)).toFixed(1);
+  $("p_m").textContent = toU(d.pmag).toFixed(1);
+  $("p_p").textContent = toU(peak.p).toFixed(1);
   // gforce
   $("gNow").textContent = d.gforce.toFixed(2);
   $("gPk").textContent = peak.gforce.toFixed(2);
@@ -438,6 +507,14 @@ function loop(now) {
   $("ts_c").textContent = toU(Math.abs(d.sr)).toFixed(1);
   $("ts_m").textContent = toU(d.smag).toFixed(1);
   $("tsp").textContent = toU(peak.s).toFixed(1);
+  $("tc_t").textContent = toU(Math.abs(d.crt)).toFixed(1);
+  $("tc_c").textContent = toU(Math.abs(d.crr)).toFixed(1);
+  $("tc_m").textContent = toU(d.cmag).toFixed(1);
+  $("tcp").textContent = toU(peak.cr).toFixed(1);
+  $("tp_t").textContent = toU(Math.abs(d.pt)).toFixed(1);
+  $("tp_c").textContent = toU(Math.abs(d.pr)).toFixed(1);
+  $("tp_m").textContent = toU(d.pmag).toFixed(1);
+  $("tpp").textContent = toU(peak.p).toFixed(1);
 
   // render
   drawStage(d);
@@ -472,6 +549,24 @@ function loop(now) {
       { hist: histS, color: resColor, width: 2.5 },
     ],
     peak.s,
+  );
+  drawTrace(
+    CC,
+    [
+      { hist: histCt, color: tanColor, width: 1.5 },
+      { hist: histCr, color: cenColor, width: 1.5 },
+      { hist: histC, color: resColor, width: 2.5 },
+    ],
+    peak.cr,
+  );
+  drawTrace(
+    CP,
+    [
+      { hist: histPt, color: tanColor, width: 1.5 },
+      { hist: histPr, color: cenColor, width: 1.5 },
+      { hist: histP, color: resColor, width: 2.5 },
+    ],
+    peak.p,
   );
 
   if (playing) requestAnimationFrame(loop);

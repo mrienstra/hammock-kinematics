@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hammock kinematics — velocity, acceleration, jerk, snap</title>
+  <title>Hammock kinematics — velocity, acceleration, jerk, snap, crackle, pop</title>
   <link href=hammock_acceleration_simulator.css rel=stylesheet />
 </head>
 
@@ -12,8 +12,12 @@
   <div class="wrap">
     <header>
       <h1>Hammock kinematics</h1>
-      <p>A frictionless pendulum bob. Velocity, acceleration, jerk, and snap — each split into tangential and radial
-        (centripetal) parts, plus its direction-free magnitude.</p>
+      <p>A frictionless pendulum bob. Velocity, acceleration, and the higher time-derivatives of position — each split
+        into tangential and radial (centripetal) parts, plus its direction-free magnitude.</p>
+      <p class="deriv-key">Successive time-derivatives of position:
+        <b>velocity</b> (1st) &rarr; <b>acceleration</b> (2nd) &rarr; <b>jerk</b> (3rd) &rarr;
+        <b>snap</b> (4th) &rarr; <b>crackle</b> (5th) &rarr; <b>pop</b> (6th).
+        Snap, crackle &amp; pop are the tongue-in-cheek but genuinely used names for derivatives 4&ndash;6.</p>
     </header>
 
     <div class="panel measure" id="measurePanel">
@@ -93,6 +97,8 @@
           <button data-mode="a">Acceleration</button>
           <button data-mode="j">Jerk</button>
           <button data-mode="s">Snap</button>
+          <button data-mode="cr">Crackle</button>
+          <button data-mode="p">Pop</button>
         </div>
         <canvas id="stage" class="stagecanvas"></canvas>
         <div class="legend">
@@ -150,6 +156,20 @@
               <td class="c-res" id="s_m">0.0</td>
               <td id="s_p">0.0</td>
             </tr>
+            <tr>
+              <td class="q">Crackle<small id="u_c">m/s⁵</small></td>
+              <td class="c-tan" id="cr_t">0.0</td>
+              <td class="c-cen" id="cr_c">0.0</td>
+              <td class="c-res" id="cr_m">0.0</td>
+              <td id="cr_p">0.0</td>
+            </tr>
+            <tr>
+              <td class="q">Pop<small id="u_p">m/s⁶</small></td>
+              <td class="c-tan" id="p_t">0.0</td>
+              <td class="c-cen" id="p_c">0.0</td>
+              <td class="c-res" id="p_m">0.0</td>
+              <td id="p_p">0.0</td>
+            </tr>
           </tbody>
         </table>
         <p class="note">Period ≈ <b id="period" style="font-family:var(--mono)">—</b> s.</p>
@@ -198,6 +218,30 @@
           <div><span id="u_ts">m/s⁴</span> &nbsp;pk <span id="tsp">0.0</span></div>
         </div>
         <canvas id="cs" height="120"></canvas>
+      </div>
+      <div class="trace">
+        <h3>Crackle</h3>
+        <div class="sub trace-vals">
+          <div class="trace-comps">
+            <span class="c-tan">tan <span id="tc_t">0.0</span></span>
+            <span class="c-cen">cen <span id="tc_c">0.0</span></span>
+            <span class="c-res">|&middot;| <span id="tc_m">0.0</span></span>
+          </div>
+          <div><span id="u_tc">m/s⁵</span> &nbsp;pk <span id="tcp">0.0</span></div>
+        </div>
+        <canvas id="cc" height="120"></canvas>
+      </div>
+      <div class="trace">
+        <h3>Pop</h3>
+        <div class="sub trace-vals">
+          <div class="trace-comps">
+            <span class="c-tan">tan <span id="tp_t">0.0</span></span>
+            <span class="c-cen">cen <span id="tp_c">0.0</span></span>
+            <span class="c-res">|&middot;| <span id="tp_m">0.0</span></span>
+          </div>
+          <div><span id="u_tp">m/s⁶</span> &nbsp;pk <span id="tpp">0.0</span></div>
+        </div>
+        <canvas id="cp" height="120"></canvas>
       </div>
     </div>
   </div>
