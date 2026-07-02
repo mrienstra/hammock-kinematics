@@ -612,7 +612,7 @@ function solveFromCycle(t) {
   // phone radius from |a|max ≈ g + r·ωpeak² (θ≈0 at max speed)
   const r = wpeak > 0.05 ? Math.max(0, (MEAS.aMax - MEAS.g) / (wpeak * wpeak)) : 0;
 
-  MEAS.T = T; MEAS.thetaMax = thetaMax; MEAS.L = L; MEAS.r = r;
+  MEAS.T = T; MEAS.thetaMax = thetaMax; MEAS.L = L;
   MEAS.amps.push({ t, theta: thetaMax });
   if (MEAS.amps.length > 40) MEAS.amps.shift();
   MEAS.cycles.push({
@@ -620,13 +620,23 @@ function solveFromCycle(t) {
     T: +T.toFixed(4),
     thetaMaxDeg: +((thetaMax * 180) / Math.PI).toFixed(2),
     L_m: +L.toFixed(4),
-    r_m: +r.toFixed(4),
+    r_m: +r.toFixed(4), // raw per-cycle radius (noisy)
     wPeak: +wpeak.toFixed(4),
     aMax: +MEAS.aMax.toFixed(4),
     aMin: +(MEAS.aMin === Infinity ? 0 : MEAS.aMin).toFixed(4),
   });
+  // r is the noisiest output — report a rolling median of recent cycles
+  // instead of the latest single (division-amplified) value
+  MEAS.r = median(MEAS.cycles.slice(-7).map((c) => c.r_m).filter((v) => v > 0));
   MEAS.ready = true;
   renderMeasure();
+}
+
+function median(a) {
+  if (!a.length) return 0;
+  const s = [...a].sort((x, y) => x - y);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
 // exponential envelope fit θ = θ0·e^(−t/τ) over recent cycle amplitudes
