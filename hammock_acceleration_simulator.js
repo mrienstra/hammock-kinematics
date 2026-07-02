@@ -173,7 +173,7 @@ function arrow(ctx, x0, y0, x1, y1, color, width) {
   ctx.lineWidth = width;
   ctx.beginPath();
   ctx.moveTo(x0, y0);
-  ctx.lineTo(x1, y1);
+  ctx.lineTo(x1 - hl * Math.cos(a), y1 - hl * Math.sin(a));
   ctx.stroke();
   ctx.beginPath();
   ctx.moveTo(x1, y1);
