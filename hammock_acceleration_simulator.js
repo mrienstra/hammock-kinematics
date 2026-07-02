@@ -1,5 +1,8 @@
 const g = 9.81;
 let L = 2.0;
+const L_MIN = 0.5, L_MAX = 40, L_STEPS = 1000;
+function sliderToL(pos) { return L_MIN * Math.pow(L_MAX / L_MIN, pos / L_STEPS); }
+function lToSlider(l) { return Math.round(Math.log(l / L_MIN) / Math.log(L_MAX / L_MIN) * L_STEPS); }
 let thetaMax = (45 * Math.PI) / 180;
 
 // --- simulation state ---
@@ -20,6 +23,8 @@ function updateUnitLabels() {
   $("u_tv").textContent = s + "/s";
   $("u_ta").textContent = s + "/s²";
   $("u_tj").textContent = s + "/s³";
+  $("lenInput").value = fmtLen(L);
+  $("lenInput").step = unit === "in" ? "1" : "0.1";
 }
 
 // peaks (direction-free magnitudes)
@@ -35,8 +40,16 @@ $("angle").addEventListener("input", (e) => {
   relaunch();
 });
 $("length").addEventListener("input", (e) => {
-  L = parseFloat(e.target.value);
-  $("lenReadout").textContent = fmtLen(L);
+  L = sliderToL(parseFloat(e.target.value));
+  $("lenInput").value = fmtLen(L);
+  relaunch();
+});
+$("lenInput").addEventListener("change", (e) => {
+  const v = parseFloat(e.target.value);
+  if (isNaN(v)) { e.target.value = fmtLen(L); return; }
+  L = Math.max(L_MIN, Math.min(L_MAX, v / CONV[unit]));
+  e.target.value = fmtLen(L);
+  $("length").value = lToSlider(L);
   relaunch();
 });
 $("playBtn").addEventListener("click", (e) => {
@@ -60,7 +73,6 @@ $("unitSeg").addEventListener("click", (e) => {
   unit = b.dataset.unit;
   [...$("unitSeg").children].forEach((c) => c.classList.toggle("on", c === b));
   updateUnitLabels();
-  $("lenReadout").textContent = fmtLen(L);
 });
 function relaunch() {
   theta = thetaMax;

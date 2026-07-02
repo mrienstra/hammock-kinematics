@@ -94,6 +94,32 @@ header p {
   font-weight: 600;
 }
 
+#lenInput {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  border-bottom: 1px dashed var(--line2);
+  width: 4.5em;
+  text-align: right;
+  padding: 0;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+#lenInput:focus {
+  outline: none;
+  border-bottom-color: var(--accent);
+}
+
+#lenInput::-webkit-outer-spin-button,
+#lenInput::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 input[type="range"] {
   width: 100%;
   cursor: pointer;
