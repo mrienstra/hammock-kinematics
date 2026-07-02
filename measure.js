@@ -53,6 +53,9 @@ const MEAS = {
   warm: true,
   skipSec: 3,
   startT: null, // timestamp of the very first event (warm-up clock)
+  // cool-down: retroactively drop the last trimSec at Stop (e.g. fishing the
+  // phone back out of a pocket)
+  trimSec: 3,
 };
 
 const $$ = (id) => document.getElementById(id);
@@ -377,6 +380,7 @@ function downloadData() {
       secureContext: window.isSecureContext,
       g: MEAS.g,
       skippedSec: MEAS.skipSec,
+      trimmedEndSec: MEAS.trimSec,
       units: "gyro deg/s, accel m/s², angle rad unless noted, lengths m",
       nSamples: s.length,
       durationSec: +dur.toFixed(2),
@@ -498,16 +502,52 @@ async function startMeasuring() {
   }, 2000);
 }
 
+// retroactively drop the last trimSec of the recording and re-derive the
+// final estimate from what remains. Returns seconds actually trimmed, or
+// -1 if that would leave too little to keep.
+function applyTrim(trimSec) {
+  if (!(trimSec > 0) || MEAS.samples.length === 0) return 0;
+  const durRel = MEAS.samples[MEAS.samples.length - 1].t;
+  const cutoff = durRel - trimSec;
+  // need at least a couple of seconds of usable data left
+  if (cutoff < 2) return -1;
+  MEAS.samples = MEAS.samples.filter((s) => s.t <= cutoff);
+  MEAS.cycles = MEAS.cycles.filter((c) => c.t <= cutoff);
+  const cutAbs = (MEAS.t0 || 0) + cutoff; // amps carry absolute timestamps
+  MEAS.amps = MEAS.amps.filter((a) => a.t <= cutAbs);
+  const cyc = MEAS.cycles;
+  if (cyc.length) {
+    const last = cyc[cyc.length - 1];
+    MEAS.T = last.T;
+    MEAS.thetaMax = (last.thetaMaxDeg * Math.PI) / 180;
+    MEAS.L = last.L_m;
+    MEAS.r = median(cyc.slice(-7).map((c) => c.r_m).filter((v) => v > 0));
+    MEAS.ready = MEAS.L > 0;
+  } else {
+    MEAS.T = 0; MEAS.thetaMax = 0; MEAS.L = 0; MEAS.r = 0; MEAS.ready = false;
+  }
+  return trimSec;
+}
+
 function stopMeasuring() {
   MEAS.on = false;
   window.removeEventListener("devicemotion", onMotion);
+  MEAS.trimSec = Math.max(0, Math.min(120, parseFloat($("trimInput").value) || 0));
+  const trimmed = applyTrim(MEAS.trimSec);
+  if (trimmed < 0) MEAS.trimSec = 0; // couldn't trim — keep everything
+  renderMeasure();
   const btn = $$("measBtn");
   btn.textContent = "Start measuring"; btn.classList.remove("recording");
   $("skipInput").disabled = false;
   $$("downloadBtn").disabled = MEAS.samples.length === 0;
+  const trimNote =
+    trimmed > 0 ? "  (dropped last " + trimmed + " s)"
+    : trimmed < 0 ? "  (ignore-last too long — kept all data)"
+    : "";
   mStatus(
     (MEAS.ready ? "Stopped. Tap “Apply to simulator” to replay this swing above." : "Stopped.") +
-      (MEAS.samples.length ? "  " + MEAS.samples.length + " samples ready to download." : ""),
+      (MEAS.samples.length ? "  " + MEAS.samples.length + " samples ready to download." : "") +
+      trimNote,
   );
 }
 

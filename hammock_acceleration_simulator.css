@@ -194,7 +194,8 @@ button:active {
   white-space: nowrap;
 }
 
-#skipInput {
+#skipInput,
+#trimInput {
   font-family: var(--mono);
   font-weight: 600;
   color: var(--ink);
@@ -208,17 +209,21 @@ button:active {
   appearance: textfield;
 }
 
-#skipInput:focus {
+#skipInput:focus,
+#trimInput:focus {
   outline: none;
   border-bottom-color: var(--accent);
 }
 
-#skipInput:disabled {
+#skipInput:disabled,
+#trimInput:disabled {
   opacity: 0.5;
 }
 
 #skipInput::-webkit-outer-spin-button,
-#skipInput::-webkit-inner-spin-button {
+#skipInput::-webkit-inner-spin-button,
+#trimInput::-webkit-outer-spin-button,
+#trimInput::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
