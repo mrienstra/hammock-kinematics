@@ -614,7 +614,7 @@ function solveFromCycle(t) {
 
   MEAS.T = T; MEAS.thetaMax = thetaMax; MEAS.L = L;
   MEAS.amps.push({ t, theta: thetaMax });
-  if (MEAS.amps.length > 40) MEAS.amps.shift();
+  if (MEAS.amps.length > 400) MEAS.amps.shift();
   MEAS.cycles.push({
     t: MEAS.t0 == null ? 0 : +(t - MEAS.t0).toFixed(3),
     T: +T.toFixed(4),
@@ -639,23 +639,111 @@ function median(a) {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
-// exponential envelope fit θ = θ0·e^(−t/τ) over recent cycle amplitudes
-function decayHint() {
-  const a = MEAS.amps;
-  if (a.length < 4) return "";
-  const t0 = a[0].t;
-  let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;
-  for (const p of a) {
-    if (p.theta <= 0) continue;
-    const x = p.t - t0, y = Math.log(p.theta);
-    n++; sx += x; sy += y; sxx += x * x; sxy += x * y;
+// Theil–Sen robust slope (median of pairwise slopes) — resists the odd
+// restless cycle where the sitter injects energy
+function theilSen(xs, ys) {
+  const sl = [];
+  for (let i = 0; i < xs.length; i++)
+    for (let j = i + 1; j < xs.length; j++) {
+      const dx = xs[j] - xs[i];
+      if (Math.abs(dx) > 1e-9) sl.push((ys[j] - ys[i]) / dx);
+    }
+  return sl.length ? median(sl) : 0;
+}
+
+function fmtTime(s) {
+  if (!isFinite(s)) return "∞";
+  return s < 90 ? s.toFixed(0) + " s" : (s / 60).toFixed(1) + " min";
+}
+
+// Adaptive decay analysis over the per-cycle amplitude log.
+//  • always: robust exponential → τ, half-life, Q
+//  • enough decay: two-channel  dθ/dt = −γθ − c  (viscous + Coulomb)
+//    → mechanism split + finite settling forecast
+//  • no downward trend: report "steady / powered" instead of fitting noise
+function analyzeDecay() {
+  const a = MEAS.amps.filter((p) => p.theta > 0);
+  if (a.length < 4) return { status: "insufficient", hint: "" };
+  const t = a.map((p) => p.t), A = a.map((p) => p.theta); // seconds, radians
+  const n = a.length, t0 = t[0];
+  const x = t.map((v) => v - t0);
+  const span = x[n - 1] - x[0] || 1;
+  const T = MEAS.T || 1;
+
+  // robust noise floor: residual about a robust linear detrend (MAD → σ)
+  const sA = theilSen(x, A), medA = median(A), medX = median(x);
+  const icA = medA - sA * medX;
+  const resid = A.map((v, i) => Math.abs(v - (icA + sA * x[i])));
+  const sigma = 1.4826 * median(resid) || 1e-4;
+
+  // steady / powered guard: decay must clear the noise and point downward
+  if (sA >= 0 || Math.abs(sA * span) < 2 * sigma) {
+    return {
+      status: "steady",
+      sigma,
+      hint: "Swing looks steady — not enough decay to estimate yet (or it's being powered).",
+    };
   }
-  const denom = n * sxx - sx * sx;
-  if (n < 4 || denom === 0) return "";
-  const slope = (n * sxy - sx * sy) / denom; // d ln θ / dt = −1/τ
-  if (slope >= -1e-4) return "Swing looks steady — little decay yet.";
-  const half = Math.log(2) / -slope; // time to halve the amplitude
-  return `Amplitude halving every ≈ ${half.toFixed(0)} s (fading).`;
+
+  // robust exponential envelope: slope of ln θ vs t = −1/τ
+  const slope = theilSen(x, A.map((v) => Math.log(v)));
+  const tau = slope < 0 ? -1 / slope : Infinity;
+  const halfLife = Math.log(2) * tau;
+  const Q = (Math.PI * tau) / T; // amplitude e-fold in radians of phase
+  const dropFrac = (A[0] - A[n - 1]) / A[0];
+  const out = { status: "ok", tau, halfLife, Q, sigma, dropFrac, nCycles: n };
+
+  // upgrade: separate viscous (γ) from dry-friction (c) once the envelope
+  // has enough curvature to constrain two parameters
+  if (dropFrac >= 0.2 && n >= 12) {
+    const xs = [], ys = [];
+    for (let i = 0; i < n - 1; i++) {
+      const dt = t[i + 1] - t[i];
+      if (dt > 0) { xs.push((A[i] + A[i + 1]) / 2); ys.push((A[i + 1] - A[i]) / dt); }
+    }
+    const m = xs.length;
+    let sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for (let i = 0; i < m; i++) { sx += xs[i]; sy += ys[i]; sxx += xs[i] * xs[i]; sxy += xs[i] * ys[i]; }
+    const den = m * sxx - sx * sx;
+    let gamma = 0, c = 0;
+    if (den !== 0) {
+      const sl2 = (m * sxy - sx * sy) / den; // = −γ
+      gamma = Math.max(0, -sl2);
+      c = Math.max(0, -((sy - sl2 * sx) / m)); // intercept = −c
+    }
+    const Anow = A[n - 1];
+    const viscRate = gamma * Anow, coulRate = c, tot = viscRate + coulRate;
+    const coulombShare = tot > 0 ? coulRate / tot : 0;
+    out.gamma = gamma; out.c = c; out.coulombShare = coulombShare;
+    out.mechanism =
+      coulombShare > 0.66 ? "dry-friction dominated — it'll come to a full stop"
+      : coulombShare < 0.33 ? "viscous/air dominated — long asymptotic tail"
+      : "mixed dry-friction + viscous";
+    // settling forecast to a small target angle
+    const targetDeg = 3, target = (targetDeg * Math.PI) / 180;
+    let settle = Infinity;
+    if (gamma > 1e-6) {
+      const K = Anow + c / gamma, val = (target + c / gamma) / K;
+      settle = val > 0 && val < 1 ? Math.log(1 / val) / gamma : val >= 1 ? 0 : Infinity;
+    } else if (c > 0) settle = Math.max(0, (Anow - target) / c);
+    out.settleSec = settle; out.targetDeg = targetDeg;
+    out.confident = dropFrac >= 0.3 && n >= 15;
+  }
+  out.hint = decayHintText(out);
+  return out;
+}
+
+function decayHintText(o) {
+  if (o.status !== "ok") return o.hint || "";
+  const parts = [`Q ≈ ${o.Q.toFixed(0)}, half-life ≈ ${fmtTime(o.halfLife)}`];
+  if (o.mechanism) {
+    parts.push(o.mechanism);
+    if (isFinite(o.settleSec)) parts.push(`≈ ${fmtTime(o.settleSec)} to settle below ${o.targetDeg}°`);
+    if (!o.confident) parts.push("(swing longer to firm up the split)");
+  } else {
+    parts.push("(estimate — swing longer for a mechanism breakdown)");
+  }
+  return parts.join(" · ");
 }
 
 function renderMeasure() {
@@ -676,9 +764,9 @@ function renderMeasure() {
     else if (ratio < 0.88) parts.push("Phone reads shorter → it's above your center of gravity (nearer the pivot).");
     else parts.push("Phone radius ≈ effective length → it's near your center of gravity. Nice placement.");
   }
-  const dh = decayHint();
+  const dh = analyzeDecay().hint;
   if (dh) parts.push(dh);
-  $$("mHint").textContent = parts.join(" ") || "Swing for a few cycles for a reading…";
+  $$("mHint").textContent = parts.join(" · ") || "Swing for a few cycles for a reading…";
   $$("applyBtn").disabled = !(MEAS.ready && MEAS.L > 0);
   $$("downloadBtn").disabled = MEAS.samples.length === 0;
 }
@@ -705,8 +793,8 @@ function downloadData() {
       effectiveLength_m: +MEAS.L.toFixed(4),
       phoneRadius_m: +MEAS.r.toFixed(4),
       radiusOverLength: MEAS.L > 0 ? +(MEAS.r / MEAS.L).toFixed(3) : null,
-      decayHint: decayHint(),
     },
+    decay: analyzeDecay(),
     cycles: MEAS.cycles,
     samples: s,
   };
