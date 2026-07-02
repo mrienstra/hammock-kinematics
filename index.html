@@ -16,29 +16,6 @@
         (centripetal) parts, plus its direction-free magnitude.</p>
     </header>
 
-    <div class="panel controls">
-      <div class="ctl">
-        <label>Release angle <b><span id="angReadout">45</span>&deg;</b></label>
-        <input type="range" id="angle" min="5" max="90" value="45" step="1">
-      </div>
-      <div class="ctl">
-        <label>Suspension length <b><input type="number" id="lenInput" value="2.0" step="0.1"> <span id="u_len">m</span></b></label>
-        <input type="range" id="length" min="0" max="1000" value="316" step="1">
-      </div>
-      <div class="ctl unit-ctl">
-        <label>Units</label>
-        <div class="seg" id="unitSeg">
-          <button data-unit="m" class="on">m</button>
-          <button data-unit="ft">ft</button>
-          <button data-unit="in">in</button>
-        </div>
-      </div>
-      <div class="btns">
-        <button id="playBtn">Pause</button>
-        <button id="resetBtn">Reset peaks</button>
-      </div>
-    </div>
-
     <div class="panel measure" id="measurePanel">
       <div class="measure-head">
         <div>
@@ -74,6 +51,29 @@
           <button id="downloadBtn" disabled>Download data</button>
           <button id="applyBtn" disabled>Apply to simulator &uarr;</button>
         </div>
+      </div>
+    </div>
+
+    <div class="panel controls">
+      <div class="ctl">
+        <label>Release angle <b><span id="angReadout">45</span>&deg;</b></label>
+        <input type="range" id="angle" min="5" max="90" value="45" step="1">
+      </div>
+      <div class="ctl">
+        <label>Suspension length <b><input type="number" id="lenInput" value="2.0" step="0.1"> <span id="u_len">m</span></b></label>
+        <input type="range" id="length" min="0" max="1000" value="316" step="1">
+      </div>
+      <div class="ctl unit-ctl">
+        <label>Units</label>
+        <div class="seg" id="unitSeg">
+          <button data-unit="m" class="on">m</button>
+          <button data-unit="ft">ft</button>
+          <button data-unit="in">in</button>
+        </div>
+      </div>
+      <div class="btns">
+        <button id="playBtn">Pause</button>
+        <button id="resetBtn">Reset peaks</button>
       </div>
     </div>
 
