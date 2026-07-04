@@ -10,15 +10,19 @@
 //  Physics used (see the forward model in simulator.js):
 //    • The gyroscope reads the swing's angular velocity ω(t). It's the
 //      same everywhere on a rigid body, so it works regardless of where
-//      the phone sits. Zero-crossings give the period T; for SHM the
-//      peak speed gives amplitude θmax = ωpeak·T/2π.
+//      the phone sits. Zero-crossings give the period T; amplitude comes
+//      from the exact energy relation ωpeak² = (2g/L)(1 − cosθmax).
 //    • Period → effective length via T = 2π√(L/g)·(2K(sin θmax/2)/π),
-//      inverting computePeriod(). Small-angle first, then one K refine.
-//    • The accelerometer (including gravity) reads a purely radial
-//      specific force  g·cosθ + r·ω²  (tangential gravity is unfelt in
-//      free swing). At the bottom θ≈0 so |a|max ≈ g + r·ωpeak² → phone
-//      radius r; at a turning point ω=0 so |a|min = g·cosθmax, an
-//      independent amplitude check. r vs L tells you where the phone is.
+//      inverting computePeriod(). Uses true g = 9.81 (dynamics), never the
+//      accelerometer's scale.
+//    • The accelerometer (including gravity) reads ≈ g·cosθ + r·ω² at
+//      phone radius r (tangential gravity is unfelt at the bob; the
+//      residual g·sinθ·(1−r/L) term is ≲0.02 m/s² at these r/L — below
+//      sensor noise). Within a half-cycle, energy makes cosθ linear in
+//      ω², so regressing |a| on ω² gives  intercept = g_cal·cosθmax
+//      (self-calibrates the device's accel scale, typically 1–3% off)
+//      and  slope = (g_cal/g)·(L/2 + r) → r. r vs L locates the phone
+//      relative to the rider's center of gravity.
 
 // True gravity for the DYNAMICS (period → length). Fixed: the pendulum's
 // period depends on real g, not on the phone's accelerometer scale.
@@ -70,6 +74,7 @@ const MEAS = {
   // cool-down: retroactively drop the last trimSec at Stop (e.g. fishing the
   // phone back out of a pocket)
   trimSec: 3,
+  trimApplied: 0, // what was actually cut (0 until Stop applies it)
 };
 
 const $$ = (id) => document.getElementById(id);
@@ -118,6 +123,7 @@ function resetAnalysis(t0) {
   MEAS.rw2 = MEAS.rw4 = MEAS.ra = MEAS.raw2 = MEAS.rn = 0;
   MEAS.prevS = 0; MEAS.primed = false; MEAS.ready = false;
   MEAS.g = 9.81; MEAS.r = 0; MEAS.rOk = false; // recalibrate g per recording
+  MEAS.trimApplied = 0;
   MEAS.t0 = t0 === undefined ? null : t0;
 }
 
@@ -238,18 +244,23 @@ function solveFromCycle(t) {
   thetaMax = Math.min(thetaMax, (89 * Math.PI) / 180);
 
   // least-squares fit of this half-cycle's |a| against ω²:
-  //   |a| = g·cosθmax + (L/2 + r)·ω²   →   g = intercept/cosθmax, r = slope − L/2
+  //   |a|/k = g·cosθmax + (L/2 + r)·ω²  with k the accel scale error, so
+  //   g_cal = intercept/cosθmax  (= k·g_true, self-calibrates the scale) and
+  //   slope = k·(L/2 + r)  →  r = slope·(G_TRUE/g_cal) − L/2.
   // (cosθ and ω² are collinear via energy, so this 1-regressor form is the
-  // well-conditioned one). g self-calibrates the accelerometer scale.
-  let gCyc = MEAS.g, rCyc = 0;
+  // well-conditioned one.) A failed/implausible fit records null so it can't
+  // pollute the rolling medians.
+  let gCyc = null, rCyc = null;
   const den = MEAS.rn * MEAS.rw4 - MEAS.rw2 * MEAS.rw2;
   const cthm = Math.cos(thetaMax);
   if (MEAS.rn >= 5 && Math.abs(den) > 1e-12 && cthm > 0.1) {
     const slope = (MEAS.rn * MEAS.raw2 - MEAS.rw2 * MEAS.ra) / den;
     const intercept = (MEAS.ra - slope * MEAS.rw2) / MEAS.rn;
-    if (intercept > 5 && intercept < 12) {
-      gCyc = intercept / cthm;
-      rCyc = slope - L / 2;
+    const gTry = intercept / cthm;
+    // accept only a plausible device scale (within ~±8% of true g)
+    if (gTry > 9.0 && gTry < 10.6) {
+      gCyc = gTry;
+      rCyc = slope * (G_TRUE / gTry) - L / 2; // undo the scale on the slope
     }
   }
 
@@ -261,22 +272,29 @@ function solveFromCycle(t) {
     T: +T.toFixed(4),
     thetaMaxDeg: +((thetaMax * 180) / Math.PI).toFixed(2),
     L_m: +L.toFixed(4),
-    r_m: +rCyc.toFixed(4), // per-cycle radius (noisy; may be < 0)
-    gCal: +gCyc.toFixed(4),
+    r_m: rCyc == null ? null : +rCyc.toFixed(4), // per-cycle radius (noisy; null = fit rejected)
+    gCal: gCyc == null ? null : +gCyc.toFixed(4),
     wPeak: +wpeak.toFixed(4),
     aMax: +MEAS.aMax.toFixed(4),
     aMin: +(MEAS.aMin === Infinity ? 0 : MEAS.aMin).toFixed(4),
   });
+  updateFromRecentCycles();
+  MEAS.ready = true;
+  renderMeasure();
+}
+
+// refresh the g / r / rOk aggregates from the last few solved cycles (shared
+// by the live path and the retroactive end-trim so they can't disagree)
+function updateFromRecentCycles() {
   const recent = MEAS.cycles.slice(-7);
-  // calibrated gravity: rolling median, clamped to a sane accelerometer range
-  const gs = recent.map((c) => c.gCal).filter((v) => v > 9.3 && v < 10.1);
+  // calibrated gravity: rolling median over accepted fits
+  const gs = recent.map((c) => c.gCal).filter((v) => v != null);
   if (gs.length) MEAS.g = median(gs);
   // radius: rolling median (noisiest output). Report only when it resolves to
   // a plausible length — small swings leave r below the accel noise floor.
-  MEAS.r = median(recent.map((c) => c.r_m));
-  MEAS.rOk = MEAS.cycles.length >= 3 && MEAS.r > 0.15;
-  MEAS.ready = true;
-  renderMeasure();
+  const rs = recent.map((c) => c.r_m).filter((v) => v != null);
+  MEAS.r = rs.length ? median(rs) : 0;
+  MEAS.rOk = rs.length >= 3 && MEAS.r > 0.15;
 }
 
 function median(a) {
@@ -398,9 +416,9 @@ function renderMeasure() {
   $$("measReadouts").hidden = false;
   $$("mTrace").hidden = false;
   $$("measFoot").hidden = false;
-  $$("mPeriod").textContent = MEAS.T.toFixed(2);
-  $$("mAngle").textContent = ((MEAS.thetaMax * 180) / Math.PI).toFixed(0);
-  $$("mLen").textContent = fmtLen(MEAS.L);
+  $$("mPeriod").textContent = MEAS.ready ? MEAS.T.toFixed(2) : "—";
+  $$("mAngle").textContent = MEAS.ready ? ((MEAS.thetaMax * 180) / Math.PI).toFixed(0) : "—";
+  $$("mLen").textContent = MEAS.ready ? fmtLen(MEAS.L) : "—";
   $$("mLenU").textContent = unit;
   $$("mRad").textContent = MEAS.rOk ? fmtLen(MEAS.r) : "—";
   $$("mRadU").textContent = unit;
@@ -438,7 +456,7 @@ function downloadData() {
       gTrue: G_TRUE, // used for the dynamics (period → length)
       gCalibrated: +MEAS.g.toFixed(4), // accelerometer scale, from |a|-vs-ω² fit
       skippedSec: MEAS.skipSec,
-      trimmedEndSec: MEAS.trimSec,
+      trimmedEndSec: MEAS.trimApplied, // 0 on a mid-recording download
       units: "gyro deg/s, accel m/s², angle rad unless noted, lengths m",
       nSamples: s.length,
       durationSec: +dur.toFixed(2),
@@ -579,10 +597,10 @@ function applyTrim(trimSec) {
     MEAS.T = last.T;
     MEAS.thetaMax = (last.thetaMaxDeg * Math.PI) / 180;
     MEAS.L = last.L_m;
-    MEAS.r = median(cyc.slice(-7).map((c) => c.r_m).filter((v) => v > 0));
+    updateFromRecentCycles(); // re-derive g / r / rOk from the surviving cycles
     MEAS.ready = MEAS.L > 0;
   } else {
-    MEAS.T = 0; MEAS.thetaMax = 0; MEAS.L = 0; MEAS.r = 0; MEAS.ready = false;
+    MEAS.T = 0; MEAS.thetaMax = 0; MEAS.L = 0; MEAS.r = 0; MEAS.rOk = false; MEAS.ready = false;
   }
   return trimSec;
 }
@@ -593,6 +611,7 @@ function stopMeasuring() {
   MEAS.trimSec = Math.max(0, Math.min(120, parseFloat($("trimInput").value) || 0));
   const trimmed = applyTrim(MEAS.trimSec);
   if (trimmed < 0) MEAS.trimSec = 0; // couldn't trim — keep everything
+  MEAS.trimApplied = trimmed > 0 ? MEAS.trimSec : 0;
   renderMeasure();
   const btn = $$("measBtn");
   btn.textContent = "Start measuring"; btn.classList.remove("recording");

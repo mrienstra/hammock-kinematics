@@ -81,16 +81,19 @@ def report_summary(d):
 def report_cycles(d):
     C = d["cycles"]
     header(f"PER-CYCLE ({len(C)} half-cycles)")
-    print("   t      T     angle   L_m    r_m   wPeak")
+    num = lambda v, fmt: (fmt % v) if isinstance(v, (int, float)) else "  ---"
+    print("   t      T     angle   L_m    r_m    gCal   wPeak")
     for c in C:
         print(f"  {c['t']:5.2f}  {c['T']:5.3f}  {c['thetaMaxDeg']:5.1f}  "
-              f"{c['L_m']:5.3f}  {c['r_m']:5.3f}  {c['wPeak']:5.3f}")
+              f"{c['L_m']:5.3f}  {num(c.get('r_m'), '%5.3f')}  "
+              f"{num(c.get('gCal'), '%5.3f')}  {c['wPeak']:5.3f}")
     L = [c["L_m"] for c in C]
-    r = [c["r_m"] for c in C]
+    r = [c.get("r_m") for c in C if isinstance(c.get("r_m"), (int, float))]
     print(f"\n  L: median={median(L):.3f} m  sd={st.pstdev(L):.4f}   "
           f"(large sd => startup ramp / instability)")
-    print(f"  r: median={median(r):.3f} m  sd={st.pstdev(r):.3f}   "
-          f"(noisiest output; app reports a rolling median)")
+    if r:
+        print(f"  r: median={median(r):.3f} m  sd={st.pstdev(r):.3f}   "
+              f"(noisiest output; app reports a rolling median)")
 
 
 def verify_raw(d):
@@ -279,9 +282,13 @@ def accel_check(d):
         cc = 1 - (L * wpk ** 2) / (2 * G)
         thmax = math.acos(cc) if -1 < cc < 1 else wpk * T / (2 * math.pi)
         c = math.cos(thmax)
-        if c > 0.1 and 5 < intercept < 12:
-            gs.append(intercept / c)
-            rs.append(slope - L / 2)
+        if c > 0.1:
+            g_cyc = intercept / c
+            if 9.0 < g_cyc < 10.6:  # plausible device scale only
+                gs.append(g_cyc)
+                # slope = (g_cyc/G)*(L/2 + r): undo the accel scale before
+                # subtracting L/2, else r comes out ~(g_cyc/G) too small
+                rs.append(slope * (G / g_cyc) - L / 2)
     if gs:
         gmed = median(gs)
         rmed = median(rs)
