@@ -228,27 +228,73 @@ def fit_decay(d):
     print(f"  forecast   : ~{fmt_time(settle)} to settle below 3 deg   [{conf}]")
 
 
+def _split_cycles(S):
+    """Split the sample stream into half-cycles at gated zero-crossings of s,
+    replicating the app's primed guard."""
+    segs, cur, peak, prev, primed = [], [], 0.0, 0.0, False
+    for x in S:
+        v = x["s"]
+        peak = max(peak, abs(v))
+        gate = max(0.25, 0.35 * peak)
+        if primed and ((prev <= 0 < v) or (prev >= 0 > v)) and peak > gate:
+            if cur:
+                segs.append(cur)
+            cur, peak = [], 0.0
+        primed = True
+        prev = v
+        cur.append(x)
+    if cur:
+        segs.append(cur)
+    return segs
+
+
 def accel_check(d):
-    """Sanity-check the felt-force model |a| = g*cos(theta) + r*w^2."""
+    """Self-calibrate g and recover phone radius r from the felt-force model.
+
+    For a pendulum, energy makes cosθ = cosθmax + (L/2g)·ω², so within a
+    constant-amplitude half-cycle  |a| = g·cosθmax + (L/2 + r)·ω². Regressing
+    |a| on ω² (well-conditioned) gives g = intercept/cosθmax and r = slope−L/2.
+    g calibrates the accelerometer scale; L (from the period) supplies the L/2.
+    """
     S = d["samples"]
-    header("ACCELEROMETER CROSS-CHECK")
+    header("ACCELEROMETER: g self-calibration + phone radius")
     amag = [x["amag"] for x in S if "amag" in x]
     if not amag:
         print("  no accel samples")
         return
-    fe = d["finalEstimate"]
-    r, Aamp = fe["phoneRadius_m"], math.radians(fe["swingAngleDeg"])
-    wpk = max(abs(x["s"]) for x in S)
-    # predicted mean |a| for a sinusoidal swing: g*<cos theta> + r*<w^2>
-    mean_cos = st.mean([math.cos(Aamp * math.cos(2 * math.pi * i / len(S)))
-                        for i in range(len(S))])
-    pred = G * mean_cos + r * (wpk ** 2) / 2
-    print(f"  measured |a|: mean={st.mean(amag):.2f}  min={min(amag):.2f}  "
-          f"max={max(amag):.2f} m/s^2")
-    print(f"  model mean  : g*<cos> + r*<w^2> ~ {pred:.2f} m/s^2 "
-          f"(should be close to measured mean)")
-    print(f"  peak-radius : (|a|max - g)/w^2peak = "
-          f"{(max(amag) - G) / wpk ** 2:.3f} m  (vs app r={r} m)")
+    L = d["finalEstimate"]["effectiveLength_m"]
+    T = d["finalEstimate"]["periodSec"]
+    print(f"  measured |a|: mean={st.mean(amag):.3f}  min={min(amag):.3f}  "
+          f"max={max(amag):.3f}  sd={st.pstdev(amag):.3f} m/s^2")
+
+    gs, rs = [], []
+    for seg in _split_cycles(S):
+        if len(seg) < 5:
+            continue
+        xs = [p["s"] ** 2 for p in seg]
+        ys = [p["amag"] for p in seg]
+        slope, intercept = ols(xs, ys)
+        wpk = max(abs(p["s"]) for p in seg)
+        thmax = wpk * T / (2 * math.pi)          # gyro amplitude for this cycle
+        c = math.cos(thmax)
+        if c > 0.1 and 5 < intercept < 12:
+            gs.append(intercept / c)
+            rs.append(slope - L / 2)
+    if gs:
+        gmed = median(gs)
+        rmed = median(rs)
+        print(f"  calibrated g : {gmed:.3f} m/s^2  (sd {st.pstdev(gs):.3f})  "
+              f"{'— device reads %+.1f%% vs 9.81' % (100 * (gmed - 9.81) / 9.81)}")
+        # centripetal signal vs noise, to judge whether r is trustworthy
+        wpk = max(abs(x["s"]) for x in S)
+        snr = max(0.0, rmed) * wpk ** 2 / (st.pstdev(amag) or 1e-6)
+        ok = rmed > 0.15 and snr > 2
+        verdict = (f"r/L={rmed / L:.2f} " +
+                   ("(below CG)" if rmed / L > 1.12 else
+                    "(above CG / near pivot)" if rmed / L < 0.88 else "(near CG)")) \
+            if ok else "UNRESOLVED — swing bigger (centripetal signal ~ noise)"
+        print(f"  phone radius : r={rmed:.3f} m  (sd {st.pstdev(rs):.3f}, "
+              f"centripetal SNR~{snr:.1f})  {verdict}")
 
 
 # ------------------------------------------------------------------ main

@@ -20,8 +20,16 @@
 //      radius r; at a turning point ω=0 so |a|min = g·cosθmax, an
 //      independent amplitude check. r vs L tells you where the phone is.
 
+// True gravity for the DYNAMICS (period → length). Fixed: the pendulum's
+// period depends on real g, not on the phone's accelerometer scale.
+const G_TRUE = 9.81;
+
 const MEAS = {
   on: false,
+  // g here is the phone's CALIBRATED gravity magnitude (may differ from
+  // G_TRUE by the accelerometer's ~1-2% scale error). Used only for the
+  // felt-force analysis (r, angle cross-check), never for L. Recalibrated
+  // per recording from the |a|-vs-ω² intercept.
   g: 9.81,
   // rolling buffer of raw angular-velocity vectors (rad/s) for axis fit
   wbuf: [],
@@ -35,6 +43,11 @@ const MEAS = {
   peakSpeed: 0, // max |s| this half-cycle
   aMax: 0, // max |accel| this half-cycle
   aMin: Infinity, // min |accel| this half-cycle
+  // per-half-cycle sums for the |a| = g·cosθmax + (L/2 + r)·ω² regression
+  // (cosθ and ω² are collinear via energy, so this single-regressor fit of
+  // |a| against ω² is the well-conditioned form): g = intercept/cosθmax,
+  // r = slope − L/2. Reset each turning point.
+  rw2: 0, rw4: 0, ra: 0, raw2: 0, rn: 0,
   lastCrossT: 0,
   halfPeriods: [], // recent half-period durations (s)
   // per-cycle amplitude log for the decay fit: {t, theta}
@@ -43,6 +56,7 @@ const MEAS = {
   L: 0,
   thetaMax: 0,
   r: 0,
+  rOk: false, // is r well-enough constrained to report?
   ready: false,
   // full recording for export
   samples: [], // per-event raw + derived
@@ -92,7 +106,7 @@ function periodToLength(T, thetaMax) {
   for (let i = 0; i < 20; i++) { const a2 = (a + b) / 2; b = Math.sqrt(a * b); a = a2; }
   const K = Math.PI / (2 * a); // = π/2 at small angle
   const bigOverSmall = (2 * K) / Math.PI; // ≥ 1, period stretch
-  return (MEAS.g * (T / (2 * Math.PI)) ** 2) / (bigOverSmall * bigOverSmall);
+  return (G_TRUE * (T / (2 * Math.PI)) ** 2) / (bigOverSmall * bigOverSmall);
 }
 
 // clear the recording / per-cycle analysis state (but keep the axis buffer
@@ -101,7 +115,9 @@ function resetAnalysis(t0) {
   MEAS.samples = []; MEAS.cycles = []; MEAS.amps = [];
   MEAS.halfPeriods = [];
   MEAS.lastCrossT = 0; MEAS.peakSpeed = 0; MEAS.aMax = 0; MEAS.aMin = Infinity;
+  MEAS.rw2 = MEAS.rw4 = MEAS.ra = MEAS.raw2 = MEAS.rn = 0;
   MEAS.prevS = 0; MEAS.primed = false; MEAS.ready = false;
+  MEAS.g = 9.81; MEAS.r = 0; MEAS.rOk = false; // recalibrate g per recording
   MEAS.t0 = t0 === undefined ? null : t0;
 }
 
@@ -168,6 +184,9 @@ function onMotion(ev) {
   if (sp > MEAS.peakSpeed) MEAS.peakSpeed = sp;
   if (amag > MEAS.aMax) MEAS.aMax = amag;
   if (amag < MEAS.aMin) MEAS.aMin = amag;
+  // accumulate sums for this half-cycle's |a|-vs-ω² regression
+  const w2 = s * s;
+  MEAS.rw2 += w2; MEAS.rw4 += w2 * w2; MEAS.ra += amag; MEAS.raw2 += amag * w2; MEAS.rn++;
 
   // detect a turning point: sign flip of s, gated by a min amplitude so
   // noise near rest doesn't register as swings. Skip detection on the very
@@ -196,6 +215,7 @@ function registerHalf(t) {
   MEAS.peakSpeed = 0;
   MEAS.aMax = 0;
   MEAS.aMin = Infinity;
+  MEAS.rw2 = MEAS.rw4 = MEAS.ra = MEAS.raw2 = MEAS.rn = 0;
 }
 
 function solveFromCycle(t) {
@@ -212,8 +232,22 @@ function solveFromCycle(t) {
   }
   thetaMax = Math.min(thetaMax, (89 * Math.PI) / 180);
   const L = periodToLength(T, thetaMax);
-  // phone radius from |a|max ≈ g + r·ωpeak² (θ≈0 at max speed)
-  const r = wpeak > 0.05 ? Math.max(0, (MEAS.aMax - MEAS.g) / (wpeak * wpeak)) : 0;
+
+  // least-squares fit of this half-cycle's |a| against ω²:
+  //   |a| = g·cosθmax + (L/2 + r)·ω²   →   g = intercept/cosθmax, r = slope − L/2
+  // (cosθ and ω² are collinear via energy, so this 1-regressor form is the
+  // well-conditioned one). g self-calibrates the accelerometer scale.
+  let gCyc = MEAS.g, rCyc = 0;
+  const den = MEAS.rn * MEAS.rw4 - MEAS.rw2 * MEAS.rw2;
+  const cthm = Math.cos(thetaMax);
+  if (MEAS.rn >= 5 && Math.abs(den) > 1e-12 && cthm > 0.1) {
+    const slope = (MEAS.rn * MEAS.raw2 - MEAS.rw2 * MEAS.ra) / den;
+    const intercept = (MEAS.ra - slope * MEAS.rw2) / MEAS.rn;
+    if (intercept > 5 && intercept < 12) {
+      gCyc = intercept / cthm;
+      rCyc = slope - L / 2;
+    }
+  }
 
   MEAS.T = T; MEAS.thetaMax = thetaMax; MEAS.L = L;
   MEAS.amps.push({ t, theta: thetaMax });
@@ -223,14 +257,20 @@ function solveFromCycle(t) {
     T: +T.toFixed(4),
     thetaMaxDeg: +((thetaMax * 180) / Math.PI).toFixed(2),
     L_m: +L.toFixed(4),
-    r_m: +r.toFixed(4), // raw per-cycle radius (noisy)
+    r_m: +rCyc.toFixed(4), // per-cycle radius (noisy; may be < 0)
+    gCal: +gCyc.toFixed(4),
     wPeak: +wpeak.toFixed(4),
     aMax: +MEAS.aMax.toFixed(4),
     aMin: +(MEAS.aMin === Infinity ? 0 : MEAS.aMin).toFixed(4),
   });
-  // r is the noisiest output — report a rolling median of recent cycles
-  // instead of the latest single (division-amplified) value
-  MEAS.r = median(MEAS.cycles.slice(-7).map((c) => c.r_m).filter((v) => v > 0));
+  const recent = MEAS.cycles.slice(-7);
+  // calibrated gravity: rolling median, clamped to a sane accelerometer range
+  const gs = recent.map((c) => c.gCal).filter((v) => v > 9.3 && v < 10.1);
+  if (gs.length) MEAS.g = median(gs);
+  // radius: rolling median (noisiest output). Report only when it resolves to
+  // a plausible length — small swings leave r below the accel noise floor.
+  MEAS.r = median(recent.map((c) => c.r_m));
+  MEAS.rOk = MEAS.cycles.length >= 3 && MEAS.r > 0.15;
   MEAS.ready = true;
   renderMeasure();
 }
@@ -358,15 +398,19 @@ function renderMeasure() {
   $$("mAngle").textContent = ((MEAS.thetaMax * 180) / Math.PI).toFixed(0);
   $$("mLen").textContent = fmtLen(MEAS.L);
   $$("mLenU").textContent = unit;
-  $$("mRad").textContent = MEAS.r > 0 ? fmtLen(MEAS.r) : "—";
+  $$("mRad").textContent = MEAS.rOk ? fmtLen(MEAS.r) : "—";
   $$("mRadU").textContent = unit;
 
   const parts = [];
-  if (MEAS.r > 0) {
+  if (MEAS.rOk) {
     const ratio = MEAS.r / MEAS.L;
     if (ratio > 1.12) parts.push("Phone reads farther than the effective length → it's below your center of gravity.");
     else if (ratio < 0.88) parts.push("Phone reads shorter → it's above your center of gravity (nearer the pivot).");
     else parts.push("Phone radius ≈ effective length → it's near your center of gravity. Nice placement.");
+    // r comes from a small centripetal signal; warn when the swing is gentle
+    if ((MEAS.thetaMax * 180) / Math.PI < 15) parts.push("(placement is low-confidence at small swing angles)");
+  } else if (MEAS.ready) {
+    parts.push("Placement: swing bigger — the centripetal signal is below the accelerometer noise here.");
   }
   const dh = analyzeDecay().hint;
   if (dh) parts.push(dh);
@@ -387,7 +431,8 @@ function downloadData() {
       generatedAt: new Date().toISOString(),
       userAgent: navigator.userAgent,
       secureContext: window.isSecureContext,
-      g: MEAS.g,
+      gTrue: G_TRUE, // used for the dynamics (period → length)
+      gCalibrated: +MEAS.g.toFixed(4), // accelerometer scale, from |a|-vs-ω² fit
       skippedSec: MEAS.skipSec,
       trimmedEndSec: MEAS.trimSec,
       units: "gyro deg/s, accel m/s², angle rad unless noted, lengths m",
@@ -399,8 +444,8 @@ function downloadData() {
       periodSec: +MEAS.T.toFixed(4),
       swingAngleDeg: +((MEAS.thetaMax * 180) / Math.PI).toFixed(2),
       effectiveLength_m: +MEAS.L.toFixed(4),
-      phoneRadius_m: +MEAS.r.toFixed(4),
-      radiusOverLength: MEAS.L > 0 ? +(MEAS.r / MEAS.L).toFixed(3) : null,
+      phoneRadius_m: MEAS.rOk ? +MEAS.r.toFixed(4) : null,
+      radiusOverLength: MEAS.rOk && MEAS.L > 0 ? +(MEAS.r / MEAS.L).toFixed(3) : null,
     },
     decay: analyzeDecay(),
     cycles: MEAS.cycles,
