@@ -223,15 +223,19 @@ function solveFromCycle(t) {
   if (hp.length < 2) return;
   const T = 2 * (hp.reduce((a, b) => a + b, 0) / hp.length);
   const wpeak = MEAS.peakSpeed;
-  // amplitude, primary estimate: SHM θmax = ωpeak·T/2π
-  let thetaMax = wpeak * T / (2 * Math.PI);
-  // accelerometer cross-check via |a|min = g·cosθmax (turning point)
-  if (MEAS.aMin < MEAS.g && MEAS.aMin > 0) {
-    const thAcc = Math.acos(Math.min(1, MEAS.aMin / MEAS.g));
-    thetaMax = 0.5 * thetaMax + 0.5 * thAcc; // blend gyro + accel
+  // Amplitude from the EXACT energy relation ωpeak² = (2·G_TRUE/L)(1−cosθmax).
+  // It needs L, so seed L from the small-angle amplitude then refine both. This
+  // is gyro-only (g-independent), so it doesn't couple to the accelerometer
+  // calibration below, and it's exact at large angles unlike θ ≈ ωpeak·T/2π.
+  const thSeed = (wpeak * T) / (2 * Math.PI);
+  let L = periodToLength(T, thSeed);
+  let thetaMax = thSeed;
+  const cE = 1 - (L * wpeak * wpeak) / (2 * G_TRUE);
+  if (cE > -1 && cE < 1) {
+    thetaMax = Math.acos(cE);
+    L = periodToLength(T, thetaMax); // refine L with the exact amplitude
   }
   thetaMax = Math.min(thetaMax, (89 * Math.PI) / 180);
-  const L = periodToLength(T, thetaMax);
 
   // least-squares fit of this half-cycle's |a| against ω²:
   //   |a| = g·cosθmax + (L/2 + r)·ω²   →   g = intercept/cosθmax, r = slope − L/2

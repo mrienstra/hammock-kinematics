@@ -275,7 +275,9 @@ def accel_check(d):
         ys = [p["amag"] for p in seg]
         slope, intercept = ols(xs, ys)
         wpk = max(abs(p["s"]) for p in seg)
-        thmax = wpk * T / (2 * math.pi)          # gyro amplitude for this cycle
+        # exact (g-independent) amplitude from energy: w^2 = (2G/L)(1-cos th)
+        cc = 1 - (L * wpk ** 2) / (2 * G)
+        thmax = math.acos(cc) if -1 < cc < 1 else wpk * T / (2 * math.pi)
         c = math.cos(thmax)
         if c > 0.1 and 5 < intercept < 12:
             gs.append(intercept / c)
