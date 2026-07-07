@@ -51,18 +51,25 @@ def simulate():
 
 
 def build_export(states, tangential):
-    D = 180 / math.pi
-    samples, cycles = [], []
-    prev_om, last_cross, halfs = 0.0, None, []
+    """Rigid-pendulum export. `tangential` toggles the g·sinθ(1−r/L) term the
+    analysis model neglects: OFF proves the pipeline algebra is exact; ON
+    proves robustness to the documented approximation."""
+    rows = []
     for (t, th, om) in states:
-        s = om + random.gauss(0, NOISE_GYRO)
-        # true specific force at radius R_PHONE. `tangential` toggles the
-        # g·sinθ(1−r/L) term the analysis model neglects: OFF proves the
-        # pipeline algebra is exact; ON proves robustness to the known
-        # (documented) approximation at a deliberately harsh r/L and angle.
         f_r = G * math.cos(th) + R_PHONE * om * om
         f_t = G * math.sin(th) * (1 - R_PHONE / L) if tangential else 0.0
         amag = K_SCALE * math.hypot(f_r, f_t) + random.gauss(0, NOISE_ACC)
+        rows.append((t, th, om, amag))
+    return assemble(rows)
+
+
+def assemble(rows):
+    """Build the app-export dict from (t, theta, omega, amag_reading) rows."""
+    D = 180 / math.pi
+    samples, cycles = [], []
+    prev_om, last_cross, halfs = 0.0, None, []
+    for (t, th, om, amag) in rows:
+        s = om + random.gauss(0, NOISE_GYRO)
         samples.append({
             "t": round(t, 4), "dt": round(1 / RATE, 4),
             "rrBeta": s * D, "rrGamma": random.gauss(0, 0.05),
@@ -142,6 +149,86 @@ def run_case(states, tangential, tol_g, tol_r, verbose):
     return fails + (0 if visc else 1)
 
 
+def simulate_spring(theta0, fb, dur):
+    """Elastic-suspension (spring) pendulum: bounce frequency fb, static
+    length L. Returns (t, theta, omega, amag_reading) rows — the phone rides
+    the bob, so |a| is the spring's specific contact force (scale + noise
+    applied here)."""
+    wb = 2 * math.pi * fb
+    zeta = 0.20                    # bounce-mode damping (fabric is lossy)
+    L0 = L - G / wb ** 2           # natural length so static length = L
+
+    def f(th, om, r, vr):
+        return (om,
+                (-G * math.sin(th) - 2 * vr * om) / r - 2 * BETA * om,
+                vr,
+                r * om * om + G * math.cos(th) - wb * wb * (r - L0) - 2 * zeta * wb * vr)
+
+    th, om = theta0, 0.0
+    r, vr = L0 + G * math.cos(theta0) / wb ** 2, 0.0  # static at release angle
+    rows, t, dt, nxt = [], 0.0, 1.0 / 1200, 0.0
+    while t <= dur:
+        if t >= nxt:
+            tension = wb * wb * (r - L0) + 2 * zeta * wb * vr  # specific contact force
+            amag = K_SCALE * abs(tension) + random.gauss(0, NOISE_ACC)
+            rows.append((t, th, om, amag))
+            nxt += 1.0 / RATE
+        k1 = f(th, om, r, vr)
+        k2 = f(th + .5 * dt * k1[0], om + .5 * dt * k1[1], r + .5 * dt * k1[2], vr + .5 * dt * k1[3])
+        k3 = f(th + .5 * dt * k2[0], om + .5 * dt * k2[1], r + .5 * dt * k2[2], vr + .5 * dt * k2[3])
+        k4 = f(th + dt * k3[0], om + dt * k3[1], r + dt * k3[2], vr + dt * k3[3])
+        th += dt / 6 * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0])
+        om += dt / 6 * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1])
+        r += dt / 6 * (k1[2] + 2 * k2[2] + 2 * k3[2] + k4[2])
+        vr += dt / 6 * (k1[3] + 2 * k2[3] + 2 * k3[3] + k4[3])
+        t += dt
+    return rows
+
+
+def run_spring_case():
+    """Joint stretch fit must recover g_cal, the stretch parameter, and the
+    corrected r from three same-device recordings (two gentle to pin g_cal,
+    one big to expose stretch)."""
+    import shutil
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import analyze_data as ad
+    fb = 1.6
+    tmpd = tempfile.mkdtemp()
+    paths = []
+    try:
+        for i, th0 in enumerate((12, 14, 40)):
+            data = assemble(simulate_spring(math.radians(th0), fb, 45.0))
+            p = os.path.join(tmpd, f"spring-{i}-{th0}deg.json")
+            with open(p, "w") as f:
+                json.dump(data, f)
+            paths.append(p)
+        res = ad.stretch_report(paths)
+    finally:
+        shutil.rmtree(tmpd, ignore_errors=True)
+    print("--- elastic suspension (joint stretch fit) ---")
+    dev = res.get("synthetic")
+    if not dev or len(dev["files"]) != 3:
+        print("  FAIL  joint fit produced no usable result")
+        return 1
+    big = dev["files"][2]
+    eps_true = (2 / (big["T"] * fb)) ** 2  # (2ω₀/ω_b)²
+    checks = [
+        ("joint g_cal", dev["gcal"], K_SCALE * G, 0.06),
+        ("stretch eps (40deg)", big["eps"], eps_true, max(0.35 * eps_true, 0.03)),
+        ("corrected r (40deg)", big["r_corr"], L, 0.30),
+    ]
+    fails = 0
+    for name, got, want, tol in checks:
+        ok = got is not None and abs(got - want) <= tol
+        fails += 0 if ok else 1
+        print(f"  {'PASS' if ok else 'FAIL'}  {name:20s} got {got:.3f}  want {want:.3f} ±{tol:.3f}")
+    # and the stretch model must actually fit better than rigid
+    better = dev["rms_stretch"] < 0.6 * dev["rms_rigid"]
+    print(f"  {'PASS' if better else 'FAIL'}  model comparison     stretch RMS {dev['rms_stretch']:.3f}"
+          f" vs rigid {dev['rms_rigid']:.3f} (expect clearly better)")
+    return fails + (0 if better else 1)
+
+
 def main():
     states = simulate()
     fails = 0
@@ -152,6 +239,7 @@ def main():
     # harsh r/L=1.28, θ0=28° → small documented biases allowed
     fails += run_case(states, tangential=True, tol_g=0.10, tol_r=0.20,
                       verbose=False)
+    fails += run_spring_case()
     sys.exit(1 if fails else 0)
 
 

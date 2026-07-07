@@ -13,7 +13,7 @@ two-channel γ+c decay fit) so the two should agree; where they don't, the raw
 samples are the source of truth. Standard library only.
 """
 
-import sys, json, math, glob, statistics as st
+import sys, os, json, math, glob, statistics as st
 
 G = 9.81
 
@@ -380,7 +380,7 @@ def accel_check(d):
             cutoff = C[m]["t"]
             print(f"  push filter : fitting only samples after t={cutoff:.1f} s (free decay)")
 
-    gs, rs = [], []
+    gs, rs, mw2s = [], [], []
     for seg in _split_cycles(S):
         if len(seg) < 5 or seg[0]["t"] < cutoff:
             continue
@@ -396,6 +396,7 @@ def accel_check(d):
             g_cyc = intercept / c
             if 9.0 < g_cyc < 10.6:  # plausible device scale only
                 gs.append(g_cyc)
+                mw2s.append(sum(xs) / len(xs))
                 # slope = (g_cyc/G)*(L/2 + r): undo the accel scale before
                 # subtracting L/2, else r comes out ~(g_cyc/G) too small
                 rs.append(slope * (G / g_cyc) - L / 2)
@@ -414,14 +415,190 @@ def accel_check(d):
             if ok else "UNRESOLVED — swing bigger (centripetal signal ~ noise)"
         print(f"  phone radius : r={rmed:.3f} m  (sd {st.pstdev(rs):.3f}, "
               f"centripetal SNR~{snr:.1f})  {verdict}")
+        # elastic-suspension signature: per-cycle apparent g falls as the
+        # swing grows (stretch amplifies the ω² part of |a|, deflating the
+        # intercept). Flag it; quantifying needs the joint --stretch fit.
+        if len(gs) >= 8 and _pearson(gs, mw2s) < -0.5:
+            print("  note        : per-cycle g falls as amplitude grows — elastic-suspension"
+                  " signature; run `analyze_data.py --stretch <files…>` to quantify")
     else:
         print("  (not enough free-decay data to calibrate g / recover r)")
 
 
+def _pearson(a, b):
+    n = len(a)
+    ma, mb = st.mean(a), st.mean(b)
+    num = sum((a[i] - ma) * (b[i] - mb) for i in range(n))
+    da = math.sqrt(sum((v - ma) ** 2 for v in a))
+    db = math.sqrt(sum((v - mb) ** 2 for v in b))
+    return num / (da * db) if da > 0 and db > 0 else 0.0
+
+
+# ------------------------------------------------------- stretch (joint fit)
+def _stretch_rows(d):
+    """Per free-decay half-cycle rows (intercept, cosθmax, slope, ⟨ω²⟩) for
+    the elastic-suspension model. Looser per-cycle g gate than accel_check:
+    stretch legitimately drags the apparent per-cycle g below 9."""
+    S = d["samples"]
+    L = d["finalEstimate"]["effectiveLength_m"]
+    T = d["finalEstimate"]["periodSec"]
+    C = d.get("cycles", [])
+    cutoff = 0.0
+    if len(C) >= 4:
+        m = free_decay_start([math.radians(c["thetaMaxDeg"]) for c in C])
+        if m > 0:
+            cutoff = C[m]["t"]
+    rows = []
+    for seg in _split_cycles(S):
+        if len(seg) < 5 or seg[0]["t"] < cutoff:
+            continue
+        xs = [p["s"] ** 2 for p in seg]
+        ys = [p["amag"] for p in seg]
+        slope, intercept = ols(xs, ys)
+        wpk = max(abs(p["s"]) for p in seg)
+        cc = 1 - (L * wpk ** 2) / (2 * G)
+        thmax = math.acos(cc) if -1 < cc < 1 else wpk * T / (2 * math.pi)
+        c = math.cos(thmax)
+        if c > 0.1 and intercept > 0 and 8.0 < intercept / c < 11.5:
+            rows.append((intercept, c, slope, sum(xs) / len(xs)))
+    return rows
+
+
+def stretch_report(paths):
+    """Joint elastic-suspension fit across recordings, grouped per device.
+
+    Physics: an elastic suspension breathes at 2× the swing frequency. Below
+    the bounce resonance ω_b this amplifies the ω²-oscillating part of |a| by
+    A_f = 1/(1 − (2ω₀/ω_b)²), inflating the per-cycle slope and deflating the
+    intercept:  intercept_i = g_cal·cosθmax_i − ε·slope_i·⟨ω²⟩_i  with
+    ε = (A_f−1)/A_f = (2ω₀/ω_b)²·A_f⁻¹·A_f = (2ω₀/ω_b)².
+
+    One recording alone can't separate g_cal from ε (both regressors track
+    amplitude), so we share g_cal across all recordings of a device (it's a
+    device property) and give each recording its own ε (a rig-loading
+    property). ε = 0 is the rigid model; the residual comparison says which
+    model the data prefers. Returns a dict for testability.
+    """
+    header("STRETCH MODEL — joint fit per device (shared g_cal, per-recording ε)")
+    groups = {}
+    for p in paths:
+        with open(p) as f:
+            d = json.load(f)
+        ua = d.get("meta", {}).get("userAgent", "?")
+        dev = "iPhone" if "iPhone" in ua else "Android" if "Android" in ua else ua[:24]
+        groups.setdefault(dev, []).append((p, d))
+
+    result = {}
+    for dev, files in groups.items():
+        entries = []
+        for p, d in files:
+            rows = _stretch_rows(d)
+            C = d.get("cycles", [])
+            amps = [c["thetaMaxDeg"] for c in C]
+            m = free_decay_start([math.radians(a) for a in amps]) if len(amps) >= 4 else 0
+            entries.append({
+                "path": p,
+                "rows": rows,
+                "T": d["finalEstimate"]["periodSec"],
+                "L": d["finalEstimate"]["effectiveLength_m"],
+                "ampHi": amps[m] if amps else 0,
+                "ampLo": amps[-1] if amps else 0,
+            })
+        entries = [e for e in entries if len(e["rows"]) >= 4]
+        if not entries:
+            print(f"  {dev}: no usable recordings")
+            continue
+        nrows = sum(len(e["rows"]) for e in entries)
+        print(f"\n  device: {dev}  ({len(entries)} recordings, {nrows} half-cycles)")
+        if len(entries) == 1:
+            print("  (single recording — g_cal and ε are partially degenerate; add a"
+                  " gentle-swing recording from the same phone to pin g_cal)")
+
+        # joint LSQ: ic = g·cos − ε_f·(slope·⟨ω²⟩); clamp ε_f ≥ 0 by dropping
+        y, cosCol, zCols, owner = [], [], [[] for _ in entries], []
+        for fi, e in enumerate(entries):
+            for (ic, cs, sl, mw2) in e["rows"]:
+                y.append(ic)
+                cosCol.append(cs)
+                owner.append(fi)
+                for fj in range(len(entries)):
+                    zCols[fj].append(-sl * mw2 if fj == fi else 0.0)
+        active = [True] * len(entries)
+        for _ in range(len(entries) + 1):
+            cols = [cosCol] + [zCols[f] for f in range(len(entries)) if active[f]]
+            b = lsq_solve(cols, y)
+            if b is None:
+                print("  (singular fit)")
+                break
+            gcal = b[0]
+            eps = [0.0] * len(entries)
+            j = 1
+            for f in range(len(entries)):
+                if active[f]:
+                    eps[f] = b[j]
+                    j += 1
+            bad = [f for f in range(len(entries)) if active[f] and eps[f] < 0]
+            if not bad:
+                break
+            for f in bad:
+                active[f] = False
+        else:
+            b = None
+        if b is None:
+            continue
+
+        # residuals: stretch model vs rigid (all ε = 0)
+        pred_st = [gcal * cosCol[i] - eps[owner[i]] * (-zCols[owner[i]][i])
+                   for i in range(len(y))]
+        # note: zCols holds −slope·⟨ω²⟩, so −zCols[...] = slope·⟨ω²⟩
+        g_rigid = sum(y[i] * cosCol[i] for i in range(len(y))) / sum(c * c for c in cosCol)
+        rms_st = math.sqrt(sum((y[i] - pred_st[i]) ** 2 for i in range(len(y))) / len(y))
+        rms_ri = math.sqrt(sum((y[i] - g_rigid * cosCol[i]) ** 2 for i in range(len(y))) / len(y))
+        print(f"  g_cal = {gcal:.3f} m/s^2 ({100 * (gcal - G) / G:+.1f}% vs 9.81)   "
+              f"residual RMS: rigid {rms_ri:.3f} -> stretch {rms_st:.3f}")
+        print("  recording                    amp(deg)   n   eps    bounce  sag     r rigid->corr   stretch")
+
+        out_files = []
+        for fi, e in enumerate(entries):
+            ep = eps[fi]
+            T, L = e["T"], e["L"]
+            w0 = 2 * math.pi / T
+            med_sl = median([r[2] for r in e["rows"]])
+            r_rigid = med_sl * (G / gcal) - L / 2
+            r_corr = med_sl * (1 - ep) * (G / gcal) - L / 2
+            fb = sag = None
+            label = "rigid"
+            if ep > 1e-3:
+                fb = 2 / (T * math.sqrt(ep))
+                sag = G * ep / (4 * w0 * w0)
+                label = ("low" if sag < 0.04 else "medium" if sag < 0.10 else "high")
+                if ep > 0.8:
+                    label += " (near resonance — unreliable)"
+            if len(entries) == 1:
+                label += " (unpinned)"
+            name = os.path.basename(e["path"]).replace("hammock-swing-", "").replace(".json", "")
+            print(f"  {name:28s} {e['ampHi']:3.0f}-{e['ampLo']:<3.0f}  {len(e['rows']):3d}"
+                  f"  {ep:5.3f}  {('%4.1fHz' % fb) if fb else '  —  '}"
+                  f"  {('%4.1fcm' % (100 * sag)) if sag else '  —  '}"
+                  f"  {r_rigid:5.2f}->{r_corr:5.2f}     {label}")
+            out_files.append({"path": e["path"], "T": T, "eps": ep, "fb": fb,
+                              "sag": sag, "r_corr": r_corr, "r_rigid": r_rigid})
+        result[dev] = {"gcal": gcal, "rms_rigid": rms_ri, "rms_stretch": rms_st,
+                       "files": out_files}
+    return result
+
+
 # ------------------------------------------------------------------ main
 def main():
-    if len(sys.argv) > 1:
-        path = sys.argv[1]
+    args = sys.argv[1:]
+    if args and args[0] == "--stretch":
+        paths = args[1:] or sorted(glob.glob("data/hammock-swing-*.json"))
+        if not paths:
+            sys.exit("no recordings found for --stretch")
+        stretch_report(paths)
+        return
+    if args:
+        path = args[0]
     else:
         files = sorted(glob.glob("data/hammock-swing-*.json"))
         if not files:
