@@ -398,36 +398,116 @@ function analyzeDecay() {
       const dt = t[i + 1] - t[i];
       if (dt > 0) { xs.push((A[i] + A[i + 1]) / 2); ys.push((A[i + 1] - A[i]) / dt); }
     }
-    const m = xs.length;
-    let sx = 0, sy = 0, sxx = 0, sxy = 0;
-    for (let i = 0; i < m; i++) { sx += xs[i]; sy += ys[i]; sxx += xs[i] * xs[i]; sxy += xs[i] * ys[i]; }
-    const den = m * sxx - sx * sx;
-    let gamma = 0, c = 0;
-    if (den !== 0) {
-      const sl2 = (m * sxy - sx * sy) / den; // = −γ
-      gamma = Math.max(0, -sl2);
-      c = Math.max(0, -((sy - sl2 * sx) / m)); // intercept = −c
-    }
+    // channel model: dA/dt = −c − γ·A − β·A²  (Coulomb, linear-viscous,
+    // quadratic/air drag). A and A² are collinear over a narrow amplitude
+    // range, so the β channel is enabled only with ≥30% decay & ≥20 cycles;
+    // below that it's the classic two-channel fit.
+    const useQuad = dropFrac >= 0.3 && n >= 20;
+    const { c, gamma, beta } = decayChannels(xs, ys, useQuad);
     const Anow = A[n - 1];
-    const viscRate = gamma * Anow, coulRate = c, tot = viscRate + coulRate;
-    const coulombShare = tot > 0 ? coulRate / tot : 0;
-    out.gamma = gamma; out.c = c; out.coulombShare = coulombShare;
-    out.mechanism =
-      coulombShare > 0.66 ? "dry-friction dominated — it'll come to a full stop"
-      : coulombShare < 0.33 ? "viscous/air dominated — long asymptotic tail"
-      : "mixed dry-friction + viscous";
-    // settling forecast to a small target angle
-    const targetDeg = 3, target = (targetDeg * Math.PI) / 180;
-    let settle = Infinity;
-    if (gamma > 1e-6) {
-      const K = Anow + c / gamma, val = (target + c / gamma) / K;
-      settle = val > 0 && val < 1 ? Math.log(1 / val) / gamma : val >= 1 ? 0 : Infinity;
-    } else if (c > 0) settle = Math.max(0, (Anow - target) / c);
-    out.settleSec = settle; out.targetDeg = targetDeg;
+    const rates = [c, gamma * Anow, beta * Anow * Anow];
+    const tot = rates[0] + rates[1] + rates[2];
+    out.c = c; out.gamma = gamma; out.beta = beta;
+    out.shares = tot > 0 ? { coulomb: rates[0] / tot, viscous: rates[1] / tot, quadratic: rates[2] / tot } : null;
+    out.mechanism = mechanismText(out.shares);
+    // settling forecast to a small target angle (numeric — no closed form
+    // once the quadratic channel is in play)
+    const targetDeg = 3;
+    out.settleSec = settleTime(Anow, c, gamma, beta, (targetDeg * Math.PI) / 180);
+    out.targetDeg = targetDeg;
     out.confident = dropFrac >= 0.3 && n >= 15;
   }
   out.hint = decayHintText(out);
   return out;
+}
+
+// Non-negative fit of dA/dt = −(c + γA + βA²): ordinary least squares on the
+// active columns, then drop the worst-offending negative channel and refit
+// (poor man's NNLS — fine for 3 parameters).
+function decayChannels(xs, ys, useQuad) {
+  let active = [true, true, useQuad]; // [const, A, A²]
+  for (;;) {
+    const cols = [];
+    if (active[0]) cols.push(xs.map(() => 1));
+    if (active[1]) cols.push(xs.slice());
+    if (active[2]) cols.push(xs.map((v) => v * v));
+    if (!cols.length) return { c: 0, gamma: 0, beta: 0 };
+    const b = lsqSolve(cols, ys);
+    if (!b) return { c: 0, gamma: 0, beta: 0 };
+    // map solved coefficients back to channels; expected sign is negative
+    const full = [0, 0, 0];
+    let j = 0;
+    for (let k = 0; k < 3; k++) if (active[k]) full[k] = b[j++];
+    let worst = -1, worstVal = 0;
+    for (let k = 0; k < 3; k++) {
+      if (active[k] && -full[k] < worstVal) { worstVal = -full[k]; worst = k; }
+    }
+    if (worst < 0) return { c: -full[0] + 0, gamma: -full[1] + 0, beta: -full[2] + 0 }; // +0 kills -0
+    active[worst] = false; // that channel wanted a negative rate — drop it
+  }
+}
+
+// least squares for y ≈ Σ b_j·col_j via normal equations + Gaussian
+// elimination (k ≤ 3). Returns null if singular.
+function lsqSolve(cols, ys) {
+  const k = cols.length, n = ys.length;
+  const M = [], v = [];
+  for (let i = 0; i < k; i++) {
+    M.push(new Array(k).fill(0));
+    let s = 0;
+    for (let p = 0; p < n; p++) s += cols[i][p] * ys[p];
+    v.push(s);
+    for (let j = 0; j < k; j++) {
+      let q = 0;
+      for (let p = 0; p < n; p++) q += cols[i][p] * cols[j][p];
+      M[i][j] = q;
+    }
+  }
+  // gaussian elimination with partial pivoting
+  for (let i = 0; i < k; i++) {
+    let piv = i;
+    for (let r = i + 1; r < k; r++) if (Math.abs(M[r][i]) > Math.abs(M[piv][i])) piv = r;
+    if (Math.abs(M[piv][i]) < 1e-12) return null;
+    [M[i], M[piv]] = [M[piv], M[i]];
+    [v[i], v[piv]] = [v[piv], v[i]];
+    for (let r = i + 1; r < k; r++) {
+      const f = M[r][i] / M[i][i];
+      for (let cIdx = i; cIdx < k; cIdx++) M[r][cIdx] -= f * M[i][cIdx];
+      v[r] -= f * v[i];
+    }
+  }
+  const b = new Array(k);
+  for (let i = k - 1; i >= 0; i--) {
+    let s = v[i];
+    for (let j = i + 1; j < k; j++) s -= M[i][j] * b[j];
+    b[i] = s / M[i][i];
+  }
+  return b;
+}
+
+function mechanismText(shares) {
+  if (!shares) return "";
+  const entries = [
+    ["dry friction — it'll come to a full stop", shares.coulomb],
+    ["linear drag (viscous) — steady exponential fade", shares.viscous],
+    ["quadratic air drag — damping fades as it slows (τ ∝ 1/A)", shares.quadratic],
+  ];
+  entries.sort((a, b) => b[1] - a[1]);
+  if (entries[0][1] > 0.5) return entries[0][0];
+  return `mixed losses: ${(shares.coulomb * 100).toFixed(0)}% friction / ` +
+    `${(shares.viscous * 100).toFixed(0)}% linear / ${(shares.quadratic * 100).toFixed(0)}% v²`;
+}
+
+// numeric settle-time for dA/dt = −(c + γA + βA²) down to `target` rad
+function settleTime(A0, c, gamma, beta, target) {
+  if (A0 <= target) return 0;
+  let A = A0, t = 0;
+  const dt = 0.05, cap = 7200;
+  while (A > target && t < cap) {
+    A -= (c + gamma * A + beta * A * A) * dt;
+    t += dt;
+  }
+  return t >= cap ? Infinity : t;
 }
 
 function decayHintText(o) {
@@ -436,6 +516,8 @@ function decayHintText(o) {
   if (o.risingIgnoredSec > 1) parts.push(`(ignored ${fmtTime(o.risingIgnoredSec)} of ramp-up)`);
   if (o.mechanism) {
     parts.push(o.mechanism);
+    if (o.shares && !o.mechanism.startsWith("mixed"))
+      parts.push(`(${(o.shares.quadratic * 100).toFixed(0)}% v² / ${(o.shares.viscous * 100).toFixed(0)}% linear / ${(o.shares.coulomb * 100).toFixed(0)}% friction)`);
     if (isFinite(o.settleSec)) parts.push(`≈ ${fmtTime(o.settleSec)} to settle below ${o.targetDeg}°`);
     if (!o.confident) parts.push("(swing longer to firm up the split)");
   } else {

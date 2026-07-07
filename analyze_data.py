@@ -55,6 +55,75 @@ def fmt_time(s):
     return f"{s:.0f} s" if s < 90 else f"{s / 60:.1f} min"
 
 
+def lsq_solve(cols, ys):
+    """Least squares y ~ sum b_j * col_j via normal equations + Gaussian
+    elimination (k <= 3). Returns None if singular."""
+    k, n = len(cols), len(ys)
+    M = [[sum(cols[i][p] * cols[j][p] for p in range(n)) for j in range(k)]
+         for i in range(k)]
+    v = [sum(cols[i][p] * ys[p] for p in range(n)) for i in range(k)]
+    for i in range(k):
+        piv = max(range(i, k), key=lambda r: abs(M[r][i]))
+        if abs(M[piv][i]) < 1e-12:
+            return None
+        M[i], M[piv] = M[piv], M[i]
+        v[i], v[piv] = v[piv], v[i]
+        for r in range(i + 1, k):
+            f = M[r][i] / M[i][i]
+            for cc in range(i, k):
+                M[r][cc] -= f * M[i][cc]
+            v[r] -= f * v[i]
+    b = [0.0] * k
+    for i in range(k - 1, -1, -1):
+        b[i] = (v[i] - sum(M[i][j] * b[j] for j in range(i + 1, k))) / M[i][i]
+    return b
+
+
+def decay_channels(xs, ys, use_quad):
+    """Non-negative fit of dA/dt = -(c + gamma*A + beta*A^2): OLS on the
+    active columns, then drop the worst-offending negative channel and refit
+    (poor man's NNLS — fine for 3 parameters). Mirrors the app."""
+    active = [True, True, use_quad]  # [const, A, A^2]
+    while True:
+        cols = []
+        if active[0]:
+            cols.append([1.0] * len(xs))
+        if active[1]:
+            cols.append(list(xs))
+        if active[2]:
+            cols.append([v * v for v in xs])
+        if not cols:
+            return 0.0, 0.0, 0.0
+        b = lsq_solve(cols, ys)
+        if b is None:
+            return 0.0, 0.0, 0.0
+        full = [0.0, 0.0, 0.0]
+        j = 0
+        for kk in range(3):
+            if active[kk]:
+                full[kk] = b[j]
+                j += 1
+        worst, worst_val = -1, 0.0
+        for kk in range(3):
+            if active[kk] and -full[kk] < worst_val:
+                worst_val = -full[kk]
+                worst = kk
+        if worst < 0:
+            return -full[0] + 0.0, -full[1] + 0.0, -full[2] + 0.0  # +0.0 kills -0.0
+        active[worst] = False  # that channel wanted a negative rate
+
+
+def settle_time(A0, c, gamma, beta, target):
+    """Numeric settle-time for dA/dt = -(c + gamma*A + beta*A^2)."""
+    if A0 <= target:
+        return 0.0
+    A, t, dt, cap = A0, 0.0, 0.05, 7200.0
+    while A > target and t < cap:
+        A -= (c + gamma * A + beta * A * A) * dt
+        t += dt
+    return float("inf") if t >= cap else t
+
+
 def header(title):
     print("\n" + title)
     print("-" * len(title))
@@ -234,29 +303,28 @@ def fit_decay(d):
     print(f"  shape RMS  : exp={r_exp:.5f}  linear={r_lin:.5f}  hyperbolic={r_quad:.5f}"
           f"  -> best fit: {best[0]}")
 
-    # combined two-channel  dA/dt = -gamma*A - c
+    # channel model  dA/dt = -(c + gamma*A + beta*A^2): Coulomb, linear-
+    # viscous, and quadratic/air drag. A and A^2 are collinear over a narrow
+    # amplitude range, so the beta channel needs >=30% decay & >=20 cycles.
     xs = [(A[i] + A[i + 1]) / 2 for i in range(n - 1) if t[i + 1] > t[i]]
     ys = [(A[i + 1] - A[i]) / (t[i + 1] - t[i]) for i in range(n - 1) if t[i + 1] > t[i]]
-    sl2, ic2 = ols(xs, ys)
-    gamma, c = max(0.0, -sl2), max(0.0, -ic2)
+    use_quad = drop >= 0.30 and n >= 20
+    c, gamma, beta = decay_channels(xs, ys, use_quad)
     anow = A[-1]
-    visc, coul = gamma * anow, c
-    tot = visc + coul
-    share = coul / tot if tot > 0 else 0.0
-    mech = ("dry-friction dominated (comes to a full stop)" if share > 0.66
-            else "viscous/air dominated (asymptotic tail)" if share < 0.33
-            else "mixed friction + viscous")
-    print(f"  two-channel: gamma={gamma:.4f}/s  c={c:.5f} rad/s  "
-          f"Coulomb share={100 * share:.0f}%  -> {mech}")
+    rates = [c, gamma * anow, beta * anow * anow]
+    tot = sum(rates)
+    shares = [r / tot for r in rates] if tot > 0 else [0, 0, 0]
+    names = ["dry friction (full stop)", "linear drag (viscous)",
+             "quadratic air drag (tau ~ 1/A)"]
+    dom = max(range(3), key=lambda i: shares[i])
+    mech = (names[dom] + " dominated") if shares[dom] > 0.5 else "mixed losses"
+    print(f"  channels   : c={c:.5f} rad/s  gamma={gamma:.4f}/s  beta={beta:.4f}/rad/s"
+          f"{'' if use_quad else '  (quadratic channel disabled: needs >=30% decay & >=20 cycles)'}")
+    print(f"  loss split : {100 * shares[0]:.0f}% friction / {100 * shares[1]:.0f}% linear"
+          f" / {100 * shares[2]:.0f}% v^2  -> {mech}")
 
-    # settling forecast from the combined model
-    target = math.radians(3)
-    if gamma > 1e-6:
-        K = anow + c / gamma
-        val = (target + c / gamma) / K
-        settle = math.log(1 / val) / gamma if 0 < val < 1 else 0.0
-    else:
-        settle = (anow - target) / c if c > 0 else float("inf")
+    # settling forecast: numeric (no closed form with the quadratic channel)
+    settle = settle_time(anow, c, gamma, beta, math.radians(3))
     conf = ("confident" if (drop >= 0.30 and n >= 15)
             else "tentative - swing longer (>30% decay) to firm up" if drop >= 0.15
             else "too little decay to trust the mechanism split")

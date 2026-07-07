@@ -135,8 +135,10 @@ def run_case(states, tangential, tol_g, tol_r, verbose):
         ok = got is not None and abs(got - want) <= tol
         fails += 0 if ok else 1
         print(f"  {'PASS' if ok else 'FAIL'}  {name:16s} got {got}  want {want:.3f} ±{tol}")
-    visc = "viscous/air dominated" in out
-    print(f"  {'PASS' if visc else 'FAIL'}  mechanism        viscous expected")
+    # the simulation damps with a linear −2βθ' term, so the three-channel
+    # fit must attribute the loss to the linear channel
+    visc = "linear drag (viscous) dominated" in out
+    print(f"  {'PASS' if visc else 'FAIL'}  mechanism        linear/viscous expected")
     return fails + (0 if visc else 1)
 
 
