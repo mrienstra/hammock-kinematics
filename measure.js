@@ -321,14 +321,44 @@ function fmtTime(s) {
   return s < 90 ? s.toFixed(0) + " s" : (s / 60).toFixed(1) + " min";
 }
 
+// Index where FREE decay begins in an amplitude series: the (last) peak —
+// everything before it was powered ramp-up (user pushing). Then skip up to
+// 3 leading readings that shed far more in one half-cycle than the rest of
+// the series does: those are push-inflated measurements / slosh transients,
+// not friction (a free pendulum can't lose 15% in one half-cycle and then
+// settle to ~1%/cycle).
+function freeDecayStart(A) {
+  let m = 0;
+  for (let i = 1; i < A.length; i++) if (A[i] >= A[m]) m = i;
+  for (let extra = 0; extra < 3 && m < A.length - 2; extra++) {
+    const decs = [];
+    for (let i = m + 1; i < A.length - 1; i++) decs.push(Math.max(0, A[i] - A[i + 1]));
+    const med = Math.max(median(decs), 0.002); // rad; floor for near-flat tails
+    if (A[m] - A[m + 1] > 5 * med) m++;
+    else break;
+  }
+  return m;
+}
+
 // Adaptive decay analysis over the per-cycle amplitude log.
+//  • powered ramp-up (amplitude rising to a peak) is detected and ignored
 //  • always: robust exponential → τ, half-life, Q
 //  • enough decay: two-channel  dθ/dt = −γθ − c  (viscous + Coulomb)
 //    → mechanism split + finite settling forecast
 //  • no downward trend: report "steady / powered" instead of fitting noise
 function analyzeDecay() {
-  const a = MEAS.amps.filter((p) => p.theta > 0);
+  let a = MEAS.amps.filter((p) => p.theta > 0);
   if (a.length < 4) return { status: "insufficient", hint: "" };
+  const start = freeDecayStart(a.map((p) => p.theta));
+  const risingIgnoredSec = start > 0 ? a[start].t - a[0].t : 0;
+  a = a.slice(start);
+  if (a.length < 4) {
+    return {
+      status: "powered",
+      risingIgnoredSec,
+      hint: "Amplitude is still rising (being pushed?) — free decay hasn't started yet.",
+    };
+  }
   const t = a.map((p) => p.t), A = a.map((p) => p.theta); // seconds, radians
   const n = a.length, t0 = t[0];
   const x = t.map((v) => v - t0);
@@ -346,6 +376,7 @@ function analyzeDecay() {
     return {
       status: "steady",
       sigma,
+      risingIgnoredSec,
       hint: "Swing looks steady — not enough decay to estimate yet (or it's being powered).",
     };
   }
@@ -356,7 +387,7 @@ function analyzeDecay() {
   const halfLife = Math.log(2) * tau;
   const Q = (Math.PI * tau) / T; // amplitude e-fold in radians of phase
   const dropFrac = (A[0] - A[n - 1]) / A[0];
-  const out = { status: "ok", tau, halfLife, Q, sigma, dropFrac, nCycles: n };
+  const out = { status: "ok", tau, halfLife, Q, sigma, dropFrac, nCycles: n, risingIgnoredSec };
 
   // upgrade: separate viscous (γ) from dry-friction (c) once the envelope
   // has enough curvature to constrain two parameters. Tentative from 15%
@@ -402,6 +433,7 @@ function analyzeDecay() {
 function decayHintText(o) {
   if (o.status !== "ok") return o.hint || "";
   const parts = [`Q ≈ ${o.Q.toFixed(0)}, half-life ≈ ${fmtTime(o.halfLife)}`];
+  if (o.risingIgnoredSec > 1) parts.push(`(ignored ${fmtTime(o.risingIgnoredSec)} of ramp-up)`);
   if (o.mechanism) {
     parts.push(o.mechanism);
     if (isFinite(o.settleSec)) parts.push(`≈ ${fmtTime(o.settleSec)} to settle below ${o.targetDeg}°`);

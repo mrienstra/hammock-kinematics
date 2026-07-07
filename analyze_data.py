@@ -157,6 +157,30 @@ def amplitude_noise(C):
     return 1.4826 * median(resid)
 
 
+def free_decay_start(A):
+    """Index where free decay begins (mirrors the app's freeDecayStart).
+
+    The (last) amplitude peak — everything before it was powered ramp-up —
+    plus up to 3 extra skips for push-inflated leading readings that shed far
+    more in one half-cycle than the rest of the series does (push residue /
+    slosh transients, not friction). A in radians.
+    """
+    m = 0
+    for i in range(1, len(A)):
+        if A[i] >= A[m]:
+            m = i
+    for _ in range(3):
+        if m >= len(A) - 2:
+            break
+        decs = [max(0.0, A[i] - A[i + 1]) for i in range(m + 1, len(A) - 1)]
+        med = max(median(decs), 0.002)
+        if A[m] - A[m + 1] > 5 * med:
+            m += 1
+        else:
+            break
+    return m
+
+
 def fit_decay(d):
     """Full decay model comparison: exponential, Coulomb-linear, quadratic-
     hyperbolic, plus the combined viscous+Coulomb (gamma, c) split."""
@@ -168,6 +192,14 @@ def fit_decay(d):
     T = d["finalEstimate"]["periodSec"] or (2 * (C[1]["t"] - C[0]["t"]))
     t = [c["t"] for c in C]
     A = [math.radians(c["thetaMaxDeg"]) for c in C]
+    m = free_decay_start(A)
+    if m > 0:
+        print(f"  push phase : ignored first {m} half-cycles ({t[m] - t[0]:.1f} s) — "
+              f"amplitude rising / push-inflated")
+        t, A, C = t[m:], A[m:], C[m:]
+    if len(A) < 4:
+        print("  amplitude still rising at the end — no free decay to fit")
+        return
     n = len(A)
     x0 = t[0]
     x = [ti - x0 for ti in t]
@@ -270,9 +302,19 @@ def accel_check(d):
     print(f"  measured |a|: mean={st.mean(amag):.3f}  min={min(amag):.3f}  "
           f"max={max(amag):.3f}  sd={st.pstdev(amag):.3f} m/s^2")
 
+    # pushing violates the free-pendulum force model (an external force adds
+    # to the specific force), so calibrate only on the free-decay phase
+    cutoff = 0.0
+    C = d.get("cycles", [])
+    if len(C) >= 4:
+        m = free_decay_start([math.radians(c["thetaMaxDeg"]) for c in C])
+        if m > 0:
+            cutoff = C[m]["t"]
+            print(f"  push filter : fitting only samples after t={cutoff:.1f} s (free decay)")
+
     gs, rs = [], []
     for seg in _split_cycles(S):
-        if len(seg) < 5:
+        if len(seg) < 5 or seg[0]["t"] < cutoff:
             continue
         xs = [p["s"] ** 2 for p in seg]
         ys = [p["amag"] for p in seg]
@@ -304,6 +346,8 @@ def accel_check(d):
             if ok else "UNRESOLVED — swing bigger (centripetal signal ~ noise)"
         print(f"  phone radius : r={rmed:.3f} m  (sd {st.pstdev(rs):.3f}, "
               f"centripetal SNR~{snr:.1f})  {verdict}")
+    else:
+        print("  (not enough free-decay data to calibrate g / recover r)")
 
 
 # ------------------------------------------------------------------ main
