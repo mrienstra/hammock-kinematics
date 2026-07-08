@@ -351,34 +351,24 @@ def _split_cycles(S):
     return segs
 
 
-def accel_check(d):
-    """Self-calibrate g and recover phone radius r from the felt-force model.
+def fit_g_and_r(d):
+    """Rigid-model g_cal / phone-radius fit, factored out of accel_check so
+    other scripts (simulate_stretch.py) can reuse the exact same regression.
 
     For a pendulum, energy makes cosθ = cosθmax + (L/2g)·ω², so within a
     constant-amplitude half-cycle  |a| = g·cosθmax + (L/2 + r)·ω². Regressing
     |a| on ω² (well-conditioned) gives g = intercept/cosθmax and r = slope−L/2.
-    g calibrates the accelerometer scale; L (from the period) supplies the L/2.
+    Returns None if there's not enough free-decay data.
     """
     S = d["samples"]
-    header("ACCELEROMETER: g self-calibration + phone radius")
-    amag = [x["amag"] for x in S if "amag" in x]
-    if not amag:
-        print("  no accel samples")
-        return
     L = d["finalEstimate"]["effectiveLength_m"]
     T = d["finalEstimate"]["periodSec"]
-    print(f"  measured |a|: mean={st.mean(amag):.3f}  min={min(amag):.3f}  "
-          f"max={max(amag):.3f}  sd={st.pstdev(amag):.3f} m/s^2")
-
-    # pushing violates the free-pendulum force model (an external force adds
-    # to the specific force), so calibrate only on the free-decay phase
     cutoff = 0.0
     C = d.get("cycles", [])
     if len(C) >= 4:
         m = free_decay_start([math.radians(c["thetaMaxDeg"]) for c in C])
         if m > 0:
             cutoff = C[m]["t"]
-            print(f"  push filter : fitting only samples after t={cutoff:.1f} s (free decay)")
 
     gs, rs, mw2s = [], [], []
     for seg in _split_cycles(S):
@@ -400,10 +390,30 @@ def accel_check(d):
                 # slope = (g_cyc/G)*(L/2 + r): undo the accel scale before
                 # subtracting L/2, else r comes out ~(g_cyc/G) too small
                 rs.append(slope * (G / g_cyc) - L / 2)
-    if gs:
-        gmed = median(gs)
-        rmed = median(rs)
-        print(f"  calibrated g : {gmed:.3f} m/s^2  (sd {st.pstdev(gs):.3f})  "
+    if not gs:
+        return None
+    return {"gcal": median(gs), "gcal_sd": st.pstdev(gs), "r": median(rs),
+            "r_sd": st.pstdev(rs), "gs": gs, "rs": rs, "mw2s": mw2s, "cutoff": cutoff}
+
+
+def accel_check(d):
+    """Self-calibrate g and recover phone radius r from the felt-force model."""
+    S = d["samples"]
+    header("ACCELEROMETER: g self-calibration + phone radius")
+    amag = [x["amag"] for x in S if "amag" in x]
+    if not amag:
+        print("  no accel samples")
+        return
+    L = d["finalEstimate"]["effectiveLength_m"]
+    print(f"  measured |a|: mean={st.mean(amag):.3f}  min={min(amag):.3f}  "
+          f"max={max(amag):.3f}  sd={st.pstdev(amag):.3f} m/s^2")
+
+    fit = fit_g_and_r(d)
+    if fit and fit["cutoff"] > 0:
+        print(f"  push filter : fitting only samples after t={fit['cutoff']:.1f} s (free decay)")
+    if fit:
+        gmed, rmed, gs, mw2s = fit["gcal"], fit["r"], fit["gs"], fit["mw2s"]
+        print(f"  calibrated g : {gmed:.3f} m/s^2  (sd {fit['gcal_sd']:.3f})  "
               f"{'— device reads %+.1f%% vs 9.81' % (100 * (gmed - 9.81) / 9.81)}")
         # centripetal signal vs noise, to judge whether r is trustworthy
         wpk = max(abs(x["s"]) for x in S)
@@ -413,14 +423,15 @@ def accel_check(d):
                    ("(below CG)" if rmed / L > 1.12 else
                     "(above CG / near pivot)" if rmed / L < 0.88 else "(near CG)")) \
             if ok else "UNRESOLVED — swing bigger (centripetal signal ~ noise)"
-        print(f"  phone radius : r={rmed:.3f} m  (sd {st.pstdev(rs):.3f}, "
+        print(f"  phone radius : r={rmed:.3f} m  (sd {fit['r_sd']:.3f}, "
               f"centripetal SNR~{snr:.1f})  {verdict}")
         # elastic-suspension signature: per-cycle apparent g falls as the
         # swing grows (stretch amplifies the ω² part of |a|, deflating the
         # intercept). Flag it; quantifying needs the joint --stretch fit.
         if len(gs) >= 8 and _pearson(gs, mw2s) < -0.5:
             print("  note        : per-cycle g falls as amplitude grows — elastic-suspension"
-                  " signature; run `analyze_data.py --stretch <files…>` to quantify")
+                  " signature; run `analyze_data.py --stretch <files…>` to quantify, or"
+                  " `simulate_stretch.py` to test it against the raw waveform")
     else:
         print("  (not enough free-decay data to calibrate g / recover r)")
 
