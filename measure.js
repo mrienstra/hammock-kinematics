@@ -62,6 +62,9 @@ const MEAS = {
   r: 0,
   rOk: false, // is r well-enough constrained to report?
   ready: false,
+  // elastic-suspension (stretch) fit
+  stretchRows: [], // per-cycle [intercept, cosθmax, slope, ⟨ω²⟩, t_rel]
+  stretch: null, // latest joint-fit result for THIS recording
   // full recording for export
   samples: [], // per-event raw + derived
   cycles: [], // per-cycle solved estimates
@@ -123,6 +126,7 @@ function resetAnalysis(t0) {
   MEAS.rw2 = MEAS.rw4 = MEAS.ra = MEAS.raw2 = MEAS.rn = 0;
   MEAS.prevS = 0; MEAS.primed = false; MEAS.ready = false;
   MEAS.g = 9.81; MEAS.r = 0; MEAS.rOk = false; // recalibrate g per recording
+  MEAS.stretchRows = []; MEAS.stretch = null;
   MEAS.trimApplied = 0;
   MEAS.t0 = t0 === undefined ? null : t0;
 }
@@ -257,7 +261,11 @@ function solveFromCycle(t) {
     const slope = (MEAS.rn * MEAS.raw2 - MEAS.rw2 * MEAS.ra) / den;
     const intercept = (MEAS.ra - slope * MEAS.rw2) / MEAS.rn;
     const gTry = intercept / cthm;
-    // accept only a plausible device scale (within ~±8% of true g)
+    // stretch-model row (looser gate — elastic suspension legitimately drags
+    // the apparent per-cycle g below 9): [ic, cosθmax, slope, ⟨ω²⟩, t]
+    if (intercept > 0 && gTry > 8.0 && gTry < 11.5)
+      MEAS.stretchRows.push([intercept, cthm, slope, MEAS.rw2 / MEAS.rn, t - (MEAS.t0 || 0)]);
+    // rigid path: accept only a plausible device scale (within ~±8% of true g)
     if (gTry > 9.0 && gTry < 10.6) {
       gCyc = gTry;
       rCyc = slope * (G_TRUE / gTry) - L / 2; // undo the scale on the slope
@@ -279,6 +287,7 @@ function solveFromCycle(t) {
     aMin: +(MEAS.aMin === Infinity ? 0 : MEAS.aMin).toFixed(4),
   });
   updateFromRecentCycles();
+  updateStretch();
   MEAS.ready = true;
   renderMeasure();
 }
@@ -302,6 +311,122 @@ function median(a) {
   const s = [...a].sort((x, y) => x - y);
   const m = s.length >> 1;
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+// ============ elastic-suspension (stretch) joint fit =====================
+// An elastic suspension breathes at 2× the swing frequency, amplifying the
+// ω²-oscillating part of |a| below the bounce resonance. Per half-cycle:
+//   intercept_i = g_cal·cosθmax_i − ε·slope_i·⟨ω²⟩_i ,  ε = (2ω₀/ω_b)²
+// One recording can't separate g_cal (a DEVICE property) from ε (a RIG
+// property) — both regressors track amplitude — so we fit jointly across
+// this phone's previous recordings, kept in localStorage (the browser is
+// the device). ε = 0 is the rigid model. Mirrors analyze_data.py --stretch.
+const CAL_KEY = "hammock.calRows.v1";
+
+function loadCalHistory() {
+  try {
+    const h = JSON.parse(localStorage.getItem(CAL_KEY));
+    return h && Array.isArray(h.recordings) ? h.recordings : [];
+  } catch (e) { return []; }
+}
+
+function saveCalHistory() {
+  const rows = freeDecayStretchRows();
+  if (rows.length < 6) return; // too thin to help future calibration
+  try {
+    const recs = loadCalHistory();
+    recs.push({
+      at: new Date().toISOString(),
+      T: MEAS.T,
+      L: MEAS.L,
+      rows: rows.slice(-40).map((r) => r.slice(0, 4)), // drop t for storage
+    });
+    while (recs.length > 12) recs.shift();
+    localStorage.setItem(CAL_KEY, JSON.stringify({ recordings: recs }));
+  } catch (e) { /* storage blocked/full — calibration just won't persist */ }
+}
+
+// current recording's rows, restricted to the free-decay phase (pushing
+// violates the force model, exactly as in the decay analysis)
+function freeDecayStretchRows() {
+  let cutRel = 0;
+  const a = MEAS.amps;
+  if (a.length >= 4) {
+    const start = freeDecayStart(a.map((p) => p.theta));
+    if (start > 0) cutRel = a[start].t - (MEAS.t0 || 0);
+  }
+  return MEAS.stretchRows.filter((r) => r[4] >= cutRel);
+}
+
+// joint LSQ: shared g_cal + per-recording ε ≥ 0 (drop-negative-and-refit).
+// recs: [{rows: [[ic, cos, slope, mw2], …]}, …]. Pure function for testing.
+function stretchFit(recs) {
+  const y = [], cs = [], z = [], owner = [];
+  recs.forEach((r, fi) => {
+    for (const row of r.rows) { y.push(row[0]); cs.push(row[1]); z.push(row[2] * row[3]); owner.push(fi); }
+  });
+  const n = y.length, F = recs.length;
+  if (n < 10 || F < 1) return null;
+  const active = new Array(F).fill(true);
+  for (let guard = 0; guard <= F; guard++) {
+    const cols = [cs];
+    const idxOf = new Array(F).fill(-1);
+    let k = 1;
+    for (let f = 0; f < F; f++) {
+      if (!active[f]) continue;
+      idxOf[f] = k++;
+      cols.push(y.map((_, i) => (owner[i] === f ? -z[i] : 0)));
+    }
+    const b = lsqSolve(cols, y);
+    if (!b) return null;
+    const eps = new Array(F).fill(0);
+    for (let f = 0; f < F; f++) if (active[f]) eps[f] = b[idxOf[f]];
+    const bad = [];
+    for (let f = 0; f < F; f++) if (active[f] && eps[f] < 0) bad.push(f);
+    if (bad.length) { bad.forEach((f) => (active[f] = false)); continue; }
+    // residuals: stretch model vs rigid (ε ≡ 0)
+    let gn = 0, gd = 0;
+    for (let i = 0; i < n; i++) { gn += y[i] * cs[i]; gd += cs[i] * cs[i]; }
+    const gRigid = gd > 0 ? gn / gd : 0;
+    let se = 0, sr = 0;
+    for (let i = 0; i < n; i++) {
+      se += (y[i] - (b[0] * cs[i] - eps[owner[i]] * z[i])) ** 2;
+      sr += (y[i] - gRigid * cs[i]) ** 2;
+    }
+    return {
+      gcal: b[0], eps,
+      rmsStretch: Math.sqrt(se / n), rmsRigid: Math.sqrt(sr / n),
+      nRows: n, nRecs: F,
+    };
+  }
+  return null;
+}
+
+// refresh MEAS.stretch from stored history + the current recording
+function updateStretch() {
+  MEAS.stretch = null;
+  const rows = freeDecayStretchRows();
+  if (rows.length < 4 || !(MEAS.T > 0)) return;
+  const recs = loadCalHistory().concat([{ rows }]);
+  const fit = stretchFit(recs);
+  if (!fit || !(fit.gcal > 9.0 && fit.gcal < 10.6)) return;
+  const ep = fit.eps[fit.eps.length - 1]; // current recording's ε
+  if (!(ep >= 0 && ep < 0.8)) return;
+  const w0 = (2 * Math.PI) / MEAS.T;
+  const rCorr = median(rows.map((r) => r[2])) * (1 - ep) * (G_TRUE / fit.gcal) - MEAS.L / 2;
+  MEAS.stretch = {
+    eps: +ep.toFixed(4),
+    gcal: +fit.gcal.toFixed(4),
+    bounceHz: ep > 1e-3 ? +((2 / (MEAS.T * Math.sqrt(ep)))).toFixed(2) : null,
+    sagM: ep > 1e-3 ? +((G_TRUE * ep) / (4 * w0 * w0)).toFixed(4) : 0,
+    rCorr: +rCorr.toFixed(4),
+    nRecs: fit.nRecs,
+    // with only the live recording, g_cal and ε are partially degenerate;
+    // history recordings pin g_cal and make ε trustworthy
+    anchored: fit.nRecs >= 2,
+    rmsStretch: +fit.rmsStretch.toFixed(4),
+    rmsRigid: +fit.rmsRigid.toFixed(4),
+  };
 }
 
 // Theil–Sen robust slope (median of pairwise slopes) — resists the odd
@@ -534,12 +659,17 @@ function renderMeasure() {
   $$("mAngle").textContent = MEAS.ready ? ((MEAS.thetaMax * 180) / Math.PI).toFixed(0) : "—";
   $$("mLen").textContent = MEAS.ready ? fmtLen(MEAS.L) : "—";
   $$("mLenU").textContent = unit;
-  $$("mRad").textContent = MEAS.rOk ? fmtLen(MEAS.r) : "—";
+  // stretch-corrected radius when the joint fit is anchored by history and
+  // found meaningful stretch; rigid value otherwise
+  const stx = MEAS.stretch;
+  const useCorr = !!(stx && stx.anchored && stx.sagM > 0.015 && stx.rCorr > 0.1);
+  const rShow = useCorr ? stx.rCorr : MEAS.r;
+  $$("mRad").textContent = MEAS.rOk ? fmtLen(rShow) : "—";
   $$("mRadU").textContent = unit;
 
   const parts = [];
   if (MEAS.rOk) {
-    const ratio = MEAS.r / MEAS.L;
+    const ratio = rShow / MEAS.L;
     if (ratio > 1.12) parts.push("Phone reads farther than the effective length → it's below your center of gravity.");
     else if (ratio < 0.88) parts.push("Phone reads shorter → it's above your center of gravity (nearer the pivot).");
     else parts.push("Phone radius ≈ effective length → it's near your center of gravity. Nice placement.");
@@ -547,6 +677,13 @@ function renderMeasure() {
     if ((MEAS.thetaMax * 180) / Math.PI < 15) parts.push("(placement is low-confidence at small swing angles)");
   } else if (MEAS.ready) {
     parts.push("Placement: swing bigger — the centripetal signal is below the accelerometer noise here.");
+  }
+  if (useCorr) {
+    parts.push(`Suspension stretch: sag ≈ ${fmtLen(stx.sagM)} ${unit} under load` +
+      (stx.bounceHz ? `, bounce ≈ ${stx.bounceHz.toFixed(1)} Hz` : "") +
+      " (radius stretch-corrected).");
+  } else if (stx && !stx.anchored && stx.sagM > 0.015) {
+    parts.push("Suspension stretch suspected — it'll be pinned down after another recording on this phone (calibration accumulates automatically).");
   }
   const dh = analyzeDecay().hint;
   if (dh) parts.push(dh);
@@ -583,6 +720,9 @@ function downloadData() {
       phoneRadius_m: MEAS.rOk ? +MEAS.r.toFixed(4) : null,
       radiusOverLength: MEAS.rOk && MEAS.L > 0 ? +(MEAS.r / MEAS.L).toFixed(3) : null,
     },
+    // elastic-suspension joint fit vs this phone's stored history (null when
+    // unresolved; `anchored` false = single recording, partially degenerate)
+    stretch: MEAS.stretch,
     decay: analyzeDecay(),
     cycles: MEAS.cycles,
     samples: s,
@@ -703,6 +843,7 @@ function applyTrim(trimSec) {
   if (cutoff < 2) return -1;
   MEAS.samples = MEAS.samples.filter((s) => s.t <= cutoff);
   MEAS.cycles = MEAS.cycles.filter((c) => c.t <= cutoff);
+  MEAS.stretchRows = MEAS.stretchRows.filter((r) => r[4] <= cutoff);
   const cutAbs = (MEAS.t0 || 0) + cutoff; // amps carry absolute timestamps
   MEAS.amps = MEAS.amps.filter((a) => a.t <= cutAbs);
   const cyc = MEAS.cycles;
@@ -712,6 +853,7 @@ function applyTrim(trimSec) {
     MEAS.thetaMax = (last.thetaMaxDeg * Math.PI) / 180;
     MEAS.L = last.L_m;
     updateFromRecentCycles(); // re-derive g / r / rOk from the surviving cycles
+    updateStretch();
     MEAS.ready = MEAS.L > 0;
   } else {
     MEAS.T = 0; MEAS.thetaMax = 0; MEAS.L = 0; MEAS.r = 0; MEAS.rOk = false; MEAS.ready = false;
@@ -726,6 +868,7 @@ function stopMeasuring() {
   const trimmed = applyTrim(MEAS.trimSec);
   if (trimmed < 0) MEAS.trimSec = 0; // couldn't trim — keep everything
   MEAS.trimApplied = trimmed > 0 ? MEAS.trimSec : 0;
+  saveCalHistory(); // this recording now helps calibrate future ones
   renderMeasure();
   const btn = $$("measBtn");
   btn.textContent = "Start measuring"; btn.classList.remove("recording");
