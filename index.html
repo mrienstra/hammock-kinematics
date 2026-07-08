@@ -88,6 +88,30 @@
       </div>
     </div>
 
+    <div class="panel susp-panel">
+      <div class="susp-row">
+        <div class="ctl">
+          <label>Suspension model</label>
+          <div class="seg" id="suspSeg">
+            <button data-susp="rigid" class="on">Rigid</button>
+            <button data-susp="elastic">Elastic</button>
+          </div>
+        </div>
+        <div class="ctl susp-param" id="bounceCtl" hidden>
+          <label>Bounce frequency <b><span id="bounceReadout">1.8</span> Hz</b></label>
+          <input type="range" id="bounceHz" min="8" max="40" value="18" step="1">
+        </div>
+        <div class="ctl susp-param" id="zetaCtl" hidden>
+          <label>Damping &zeta; <b><span id="zetaReadout">0.60</span></b></label>
+          <input type="range" id="zeta" min="10" max="150" value="60" step="5">
+        </div>
+      </div>
+      <p class="note" id="suspNote" hidden>Elastic mode adds a damped radial spring (defaults ≈ what we measured on
+        a real hammock: ~1.8&nbsp;Hz bounce, &zeta;&nbsp;≈&nbsp;0.6). The stage, felt g-force, velocity, and
+        acceleration reflect the resulting bounce; jerk and higher derivatives aren't modeled for the elastic case,
+        so those modes are disabled below.</p>
+    </div>
+
     <div class="main">
       <!-- LEFT: stage -->
       <div class="panel stage">
@@ -148,7 +172,7 @@
               <td class="c-min" id="a_min">0.00</td>
               <td id="a_p">0.00</td>
             </tr>
-            <tr>
+            <tr id="tr_j">
               <td class="q">Jerk<small id="u_j">m/s³</small></td>
               <td class="c-tan" id="j_t">0.0</td>
               <td class="c-cen" id="j_c">0.0</td>
@@ -156,7 +180,7 @@
               <td class="c-min" id="j_min">0.0</td>
               <td id="j_p">0.0</td>
             </tr>
-            <tr>
+            <tr id="tr_s">
               <td class="q">Snap<small id="u_s">m/s⁴</small></td>
               <td class="c-tan" id="s_t">0.0</td>
               <td class="c-cen" id="s_c">0.0</td>
@@ -164,7 +188,7 @@
               <td class="c-min" id="s_min">0.0</td>
               <td id="s_p">0.0</td>
             </tr>
-            <tr>
+            <tr id="tr_cr">
               <td class="q">Crackle<small id="u_c">m/s⁵</small></td>
               <td class="c-tan" id="cr_t">0.0</td>
               <td class="c-cen" id="cr_c">0.0</td>
@@ -172,7 +196,7 @@
               <td class="c-min" id="cr_min">0.0</td>
               <td id="cr_p">0.0</td>
             </tr>
-            <tr>
+            <tr id="tr_p">
               <td class="q">Pop<small id="u_p">m/s⁶</small></td>
               <td class="c-tan" id="p_t">0.0</td>
               <td class="c-cen" id="p_c">0.0</td>
@@ -210,7 +234,7 @@
         </div>
         <canvas id="ca" height="120"></canvas>
       </div>
-      <div class="trace">
+      <div class="trace" id="traceJerk">
         <h3>Jerk</h3>
         <div class="sub trace-vals">
           <div class="trace-comps">
@@ -222,7 +246,7 @@
         </div>
         <canvas id="cj" height="120"></canvas>
       </div>
-      <div class="trace">
+      <div class="trace" id="traceSnap">
         <h3>Snap</h3>
         <div class="sub trace-vals">
           <div class="trace-comps">
@@ -234,7 +258,7 @@
         </div>
         <canvas id="cs" height="120"></canvas>
       </div>
-      <div class="trace">
+      <div class="trace" id="traceCrackle">
         <h3>Crackle</h3>
         <div class="sub trace-vals">
           <div class="trace-comps">
@@ -246,7 +270,7 @@
         </div>
         <canvas id="cc" height="120"></canvas>
       </div>
-      <div class="trace">
+      <div class="trace" id="tracePop">
         <h3>Pop</h3>
         <div class="sub trace-vals">
           <div class="trace-comps">

@@ -5,9 +5,21 @@ function sliderToL(pos) { return L_MIN * Math.pow(L_MAX / L_MIN, pos / L_STEPS);
 function lToSlider(l) { return Math.round(Math.log(l / L_MIN) / Math.log(L_MAX / L_MIN) * L_STEPS); }
 let thetaMax = (45 * Math.PI) / 180;
 
+// --- suspension model: rigid (default) or an elastic radial spring. r is
+// the bob's actual distance from the pivot; L is its equilibrium/static
+// value (what "Suspension length" already meant). In rigid mode r stays
+// exactly L forever (its ODE derivative is identically zero) — zero
+// behavior change from before this feature existed. ---
+let suspension = "rigid"; // "rigid" | "elastic"
+let bounceHz = 1.8; // matches the bounce frequency measured on a real hammock
+let zeta = 0.6; // damping ratio; matches the heavy damping measured too
+const HIGHER_ORDER_MODES = ["j", "s", "cr", "p"]; // not modeled once elastic
+
 // --- simulation state ---
 let theta = thetaMax,
-  omega = 0;
+  omega = 0,
+  r = L,
+  vr = 0;
 let playing = true;
 let mode = "v";
 let unit = "m";
@@ -87,9 +99,57 @@ $("unitSeg").addEventListener("click", (e) => {
   [...$("unitSeg").children].forEach((c) => c.classList.toggle("on", c === b));
   updateUnitLabels();
 });
+$("suspSeg").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  suspension = b.dataset.susp;
+  [...$("suspSeg").children].forEach((c) => c.classList.toggle("on", c === b));
+  const el = suspension === "elastic";
+  $("bounceCtl").hidden = !el;
+  $("zetaCtl").hidden = !el;
+  $("suspNote").hidden = !el;
+  updateElasticGating();
+  relaunch();
+});
+$("bounceHz").addEventListener("input", (e) => {
+  bounceHz = parseFloat(e.target.value) / 10; // slider 8-40 -> 0.8-4.0 Hz
+  $("bounceReadout").textContent = bounceHz.toFixed(1);
+  relaunch();
+});
+$("zeta").addEventListener("input", (e) => {
+  zeta = parseFloat(e.target.value) / 100; // slider 10-150 -> 0.10-1.50
+  $("zetaReadout").textContent = zeta.toFixed(2);
+  relaunch();
+});
+// jerk & higher derivatives aren't modeled for the elastic (coupled 2-DOF)
+// case — grey out those controls/rows/traces and bounce back to a modeled
+// mode if one was selected
+function updateElasticGating() {
+  const na = suspension === "elastic";
+  [...$("modeSeg").children].forEach((c) => {
+    if (HIGHER_ORDER_MODES.includes(c.dataset.mode)) c.disabled = na;
+  });
+  ["tr_j", "tr_s", "tr_cr", "tr_p", "traceJerk", "traceSnap", "traceCrackle", "tracePop"]
+    .forEach((id) => $(id).classList.toggle("elastic-na", na));
+  if (na && HIGHER_ORDER_MODES.includes(mode)) {
+    mode = "a";
+    [...$("modeSeg").children].forEach((c) => c.classList.toggle("on", c.dataset.mode === "a"));
+  }
+}
 function relaunch() {
   theta = thetaMax;
   omega = 0;
+  if (suspension === "elastic") {
+    // quasi-static radial position at release: the spring is already at the
+    // equilibrium implied by gravity's radial component at this angle (no
+    // centrifugal contribution yet, since omega=0) — matches simulate_stretch.py
+    const wb = 2 * Math.PI * bounceHz;
+    r = L - (g / (wb * wb)) * (1 - Math.cos(thetaMax));
+    r = Math.max(r, 0.05 * L); // defensive floor against pathological slider combos
+  } else {
+    r = L;
+  }
+  vr = 0;
   resetPeaks();
   computePeriod();
 }
@@ -131,62 +191,115 @@ function computePeriod() {
   }
   const K = Math.PI / (2 * a);
   const T = 4 * Math.sqrt(L / g) * K;
-  $("period").textContent = T.toFixed(2);
+  $("period").textContent = T.toFixed(2) + (suspension === "elastic" ? " (rigid approx)" : "");
 }
 
-// --- physics derivation at a given state (defaults to the live theta/omega) ---
-function derive(th = theta, om = omega) {
-  const k = g / L;
+// --- physics derivation at a given state (defaults to the live state) ---
+// Velocity, acceleration, and felt g-force are exact for BOTH suspension
+// models — they're the general (varying-r) polar kinematics formulas, which
+// reduce identically to the old fixed-L ones when rr=L, vrr=0 (rigid).
+// Jerk and higher derivatives below are only ever the RIGID closed forms
+// (re-deriving them for the coupled 2-DOF elastic system is a much bigger
+// job than this feature needs); the UI disables those modes/rows/traces
+// whenever suspension is elastic (see updateElasticGating), so a rigid
+// approximation quietly feeding through here is never actually shown.
+// Elastic suspension force per unit mass. A rope/strap can go SLACK (zero
+// tension) but never push — unlike an idealized bidirectional spring, which
+// would happily go negative (compressive) on an aggressive enough swing.
+// Clamping at 0 here is what makes a big elastic swing correctly show brief
+// near-weightless "air time" instead of an unphysical negative g-force, and
+// keeps derive()'s display and step()'s integration using the identical
+// force (so they can't silently diverge from each other).
+function springForce(rr, vrr) {
+  const wb = 2 * Math.PI * bounceHz;
+  return Math.max(0, wb * wb * (rr - L) + 2 * zeta * wb * vrr);
+}
+
+function derive(th = theta, om = omega, rr = r, vrr = vr) {
   const c = Math.cos(th),
     s = Math.sin(th);
-  // time-derivatives of angular acceleration α = θ̈ = -(g/L)sinθ
-  const alpha = -k * s;
+  // theta'' — generalizes -(g/L)sinθ to varying r (Coriolis-coupled)
+  const alpha = (-g * s - 2 * vrr * om) / rr;
+  // velocity: tangential (r·ω) + radial (ṙ, zero when rigid)
+  const vt = rr * om;
+  const vRad = vrr;
+  const vmag = Math.hypot(vt, vRad);
+  // acceleration (standard polar kinematics): radial accel r̈ is the
+  // spring's response when elastic, else identically 0 (r held at L)
+  let rAccel = 0;
+  // felt g-force = the actual support/spring force per unit mass. Rigid: the
+  // fabric supplies whatever's needed to hold r=L (g·cosθ + r·ω², as before).
+  // Elastic: it's literally the spring's restoring+damping force (clamped at
+  // 0 — slack, not compressive) — part of the centripetal+gravity load now
+  // goes into accelerating the bob radially instead of being transmitted to
+  // what you're lying on.
+  let feltForce;
+  if (suspension === "elastic") {
+    feltForce = springForce(rr, vrr);
+    rAccel = rr * om * om + g * c - feltForce;
+  } else {
+    feltForce = g * c + rr * om * om;
+  }
+  const at = rr * alpha + 2 * vrr * om; // tangential, signed (generalizes L·alpha)
+  const ac = rr * om * om - rAccel; // toward-pivot magnitude (generalizes L·ω²)
+  const amag = Math.hypot(at, ac);
+  const gforce = feltForce / g;
+
+  // --- rigid-only closed forms below (jerk through pop; see note above) ---
+  const k = g / L;
+  const alphaRigid = -k * s;
   const alphaDot = -k * c * om; // α̇
-  const alphaDot2 = -k * (c * alpha - s * om * om); // α̈
+  const alphaDot2 = -k * (c * alphaRigid - s * om * om); // α̈
   const alphaDot3 = k * k * om * (c * c - 3 * s * s) + k * c * om ** 3; // α⃛
   const alphaDot4 =
     -(k ** 3) * s * (c * c - 3 * s * s) -
     11 * k * k * s * c * om * om -
     k * s * om ** 4; // α⃜
-  // velocity (tangential only)
-  const vt = L * om;
-  const vmag = Math.abs(vt);
-  // acceleration
-  const at = L * alpha; // tangential, signed
-  const ac = L * om * om; // centripetal, toward pivot (+)
-  const amag = Math.hypot(at, ac);
   // jerk (3rd derivative of position)
   const jt = L * (alphaDot - om ** 3); // tangential, signed
-  const jr = -3 * L * om * alpha; // along outward radial, signed
+  const jr = -3 * L * om * alphaRigid; // along outward radial, signed
   const jmag = Math.hypot(jt, jr);
   // snap (4th derivative)
-  const st = L * (alphaDot2 - 6 * om * om * alpha); // tangential, signed
-  const sr = L * (om ** 4 - 3 * alpha * alpha - 4 * om * alphaDot); // outward radial, signed
+  const st = L * (alphaDot2 - 6 * om * om * alphaRigid); // tangential, signed
+  const sr = L * (om ** 4 - 3 * alphaRigid * alphaRigid - 4 * om * alphaDot); // outward radial, signed
   const smag = Math.hypot(st, sr);
   // crackle (5th derivative)
-  const crt = L * (alphaDot3 + om ** 5 - 15 * om * alpha * alpha - 10 * om * om * alphaDot); // tangential
-  const crr = L * (10 * om ** 3 * alpha - 10 * alpha * alphaDot - 5 * om * alphaDot2); // outward radial
+  const crt = L * (alphaDot3 + om ** 5 - 15 * om * alphaRigid * alphaRigid - 10 * om * om * alphaDot); // tangential
+  const crr = L * (10 * om ** 3 * alphaRigid - 10 * alphaRigid * alphaDot - 5 * om * alphaDot2); // outward radial
   const cmag = Math.hypot(crt, crr);
   // pop (6th derivative)
-  const pt = L * (alphaDot4 + 15 * om ** 4 * alpha - 15 * alpha ** 3 - 60 * om * alpha * alphaDot - 15 * om * om * alphaDot2); // tangential
-  const pr = L * (-(om ** 6) + 45 * om * om * alpha * alpha + 20 * om ** 3 * alphaDot - 10 * alphaDot * alphaDot - 15 * alpha * alphaDot2 - 6 * om * alphaDot3); // outward radial
+  const pt = L * (alphaDot4 + 15 * om ** 4 * alphaRigid - 15 * alphaRigid ** 3 - 60 * om * alphaRigid * alphaDot - 15 * om * om * alphaDot2); // tangential
+  const pr = L * (-(om ** 6) + 45 * om * om * alphaRigid * alphaRigid + 20 * om ** 3 * alphaDot - 10 * alphaDot * alphaDot - 15 * alphaRigid * alphaDot2 - 6 * om * alphaDot3); // outward radial
   const pmag = Math.hypot(pt, pr);
-  // felt g-force = proper acceleration / g = (g cosθ + Lω²)/g, purely radial
-  const gforce = (g * c + L * om * om) / g;
   return { alpha, at, ac, amag, vt, vmag, jt, jr, jmag, st, sr, smag, crt, crr, cmag, pt, pr, pmag, gforce };
 }
 
-// --- RK4 integrator for (theta, omega) ---
-function deriv(th, w) {
-  return [w, -(g / L) * Math.sin(th)];
+// --- RK4 integrator for (theta, omega, r, vr) ---
+// theta'' generalizes -(g/L)sinθ with the Coriolis-type coupling; r'' is
+// the spring response (elastic) or identically 0 (rigid — r's derivative
+// is exactly zero every step, so it stays at its initial value forever,
+// no drift, no branching needed elsewhere).
+function deriv(th, om, rr, vrr) {
+  const dtheta = om;
+  const dOmega = (-g * Math.sin(th) - 2 * vrr * om) / rr;
+  let dr = 0,
+    dvr = 0;
+  if (suspension === "elastic") {
+    dr = vrr;
+    dvr = rr * om * om + g * Math.cos(th) - springForce(rr, vrr);
+  }
+  return [dtheta, dOmega, dr, dvr];
 }
 function step(dt) {
-  const [k1a, k1b] = deriv(theta, omega);
-  const [k2a, k2b] = deriv(theta + 0.5 * dt * k1a, omega + 0.5 * dt * k1b);
-  const [k3a, k3b] = deriv(theta + 0.5 * dt * k2a, omega + 0.5 * dt * k2b);
-  const [k4a, k4b] = deriv(theta + dt * k3a, omega + dt * k3b);
-  theta += (dt / 6) * (k1a + 2 * k2a + 2 * k3a + k4a);
-  omega += (dt / 6) * (k1b + 2 * k2b + 2 * k3b + k4b);
+  const k1 = deriv(theta, omega, r, vr);
+  const k2 = deriv(theta + 0.5 * dt * k1[0], omega + 0.5 * dt * k1[1], r + 0.5 * dt * k1[2], vr + 0.5 * dt * k1[3]);
+  const k3 = deriv(theta + 0.5 * dt * k2[0], omega + 0.5 * dt * k2[1], r + 0.5 * dt * k2[2], vr + 0.5 * dt * k2[3]);
+  const k4 = deriv(theta + dt * k3[0], omega + dt * k3[1], r + dt * k3[2], vr + dt * k3[3]);
+  theta += (dt / 6) * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0]);
+  omega += (dt / 6) * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1]);
+  r += (dt / 6) * (k1[2] + 2 * k2[2] + 2 * k3[2] + k4[2]);
+  vr += (dt / 6) * (k1[3] + 2 * k2[3] + 2 * k3[3] + k4[3]);
+  if (suspension === "elastic") r = Math.max(r, 0.03 * L); // defensive floor
 }
 
 // --- canvas setup with devicePixelRatio ---
@@ -245,8 +358,15 @@ function drawStage(d) {
   const px = w / 2,
     py = 44;
   const Lpx = Math.min(h - 120, 210);
-  const bx = px + Math.sin(theta) * Lpx,
-    by = py + Math.cos(theta) * Lpx;
+  // bob's actual pixel distance from the pivot, scaled by the same px/m
+  // ratio as the nominal L — in rigid mode r===L always, so rpx===Lpx and
+  // this is visually identical to before. In elastic mode this is what
+  // makes the stretch actually visible: the suspension line and bob
+  // visibly lengthen/shorten relative to the fixed arc guide (still drawn
+  // at the nominal Lpx below) as the spring breathes.
+  const rpx = Lpx * (r / L);
+  const bx = px + Math.sin(theta) * rpx,
+    by = py + Math.cos(theta) * rpx;
   // ceiling
   ctx.strokeStyle = "#94a3b8";
   ctx.lineWidth = 5;
@@ -645,5 +765,6 @@ function renderStatic() {
 // init
 sizeStage();
 sizeTraces();
+updateElasticGating();
 computePeriod();
 requestAnimationFrame(loop);

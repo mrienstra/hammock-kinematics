@@ -141,6 +141,32 @@ input[type="range"] {
   align-self: end;
 }
 
+/* suspension model */
+.susp-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.susp-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1.5rem;
+}
+
+.susp-param input[type="range"] {
+  width: 160px;
+}
+
+/* dimmed when the current suspension model doesn't define this quantity
+   (jerk and higher derivatives aren't modeled for the elastic case) */
+.elastic-na {
+  opacity: 0.35;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
 button {
   font-family: var(--sans);
   font-size: 0.82rem;
